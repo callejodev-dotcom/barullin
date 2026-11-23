@@ -14,7 +14,7 @@
 #define SR 44100.0f
 
 /* ------------------------------------------------------------- ajustes --- */
-#define SET_MAGIC 0x42524C41u            /* "BRLA" */
+#define SET_MAGIC 0x42524C42u            /* "BRLB" */
 #define LOOP_MAX 64                      /* cambios de acorde en una idea */
 #define LOOP_STEPS 128                   /* 16 compases de corcheas */
 typedef struct { uint8_t step; int8_t degree; uint8_t mods; uint8_t inv; } loop_ev_t;
@@ -176,11 +176,17 @@ static volatile uint32_t arp_steps;      /* pasos tocados (para las pruebas) */
 static float note_inc(int note) { return 440.0f * fm_exp2f((float)(note - 69) / 12.0f) / SR; }
 
 /* el acorde nuevo: las notas que ya suenan siguen sin cortarse; las demás se sueltan o se asignan */
+static int arp_restart;
 static void take_chord(const snd_chord *c)
 {
     int i, j, used[NPAD] = {0};
     int pad_gate = c->gate;               /* el pad, su propia capa: su volumen en HOME */
-    if (c != &achord) achord = *c;
+    if (c != &achord) {
+        int k, same = c->n == achord.n && c->bass == achord.bass;
+        for (k = 0; same && k < c->n; k++) same = c->notes[k] == achord.notes[k];
+        if (!same) arp_restart = 1;           /* acorde nuevo: el arpegio empieza su patrón desde el principio */
+        achord = *c;
+    }
     for (j = 0; j < NPAD; j++) {
         int keep = 0;
         if (pad_gate && pad[j].gate)
@@ -345,7 +351,9 @@ static void arp_voice(int note, int low, float step, int len)
 
 static void arp_fire(float step)
 {
-    int note = arp_note(arp_i++);
+    int note;
+    if (arp_restart) { arp_restart = 0; arp_i = 0; }
+    note = arp_note(arp_i++);
     if (note < 0) return;
     arp_voice(note, 0, step, set.arp_len);
     arp_steps++;
@@ -367,10 +375,12 @@ static float bp_step_len(void)
     static const float PER_BEAT[4] = {1.0f, 2.0f, 3.0f, 4.0f};
     return SR * 60.0f / (float)set.tempo / PER_BEAT[set.bp_div % 4u];
 }
-static void bp_fire(float step)
+static void bp_fire(float step, uint32_t idx)
 {
     int note = achord.bass;
-    if (bp_i++ & 1u) note += set.bp_pat == 1 ? 12 : set.bp_pat == 2 ? 7 : 0;
+    /* octavas o quinta: la fundamental, siempre en el paso par de la rejilla (en el pulso) */
+    if (idx & 1u) note += set.bp_pat == 1 ? 12 : set.bp_pat == 2 ? 7 : 0;
+    bp_i++;
     note += 12 * set.bp_oct;
     arp_voice(clamp(note, 0, 127), 1, step, set.bp_len);
 }
@@ -507,7 +517,7 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             if (set.bp_on) {
                 uint32_t pb = BP_PB[set.bp_div % 4u];
                 idx = tp_bint * pb + (uint32_t)(tp_bfrac * (float)pb);
-                if (idx != bp_last) { bp_last = idx; if (achord.gate) bp_fire(bp_step_len()); }
+                if (idx != bp_last) { bp_last = idx; if (achord.gate) bp_fire(bp_step_len(), idx); }
             }
         }
         for (j = 0; j < NPAD; j++) {
@@ -698,7 +708,7 @@ static void settings_defaults(void)
             set.lfo[k].shape = 0;
         }
     }
-    set.benv_a = 3;                          /* el bajo, como sonaba: ~20 ms de ataque, ~65 ms de release */
+    set.benv_a = 1;                          /* el bajo: ~4 ms de ataque (con 20 ms llegaba tarde al arpegio), ~65 ms de release */
     set.benv_d = 5;
     set.benv_s = 10;
     set.benv_r = 2;
