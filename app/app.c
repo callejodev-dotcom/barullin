@@ -14,7 +14,7 @@
 #define SR 44100.0f
 
 /* ------------------------------------------------------------- ajustes --- */
-#define SET_MAGIC 0x42524C3Au            /* "BRL:" */
+#define SET_MAGIC 0x42524C3Bu            /* "BRL;" */
 #define LOOP_MAX 64                      /* cambios de acorde en una idea */
 #define LOOP_STEPS 128                   /* 16 compases de corcheas */
 typedef struct { uint8_t step; int8_t degree; uint8_t mods; uint8_t inv; } loop_ev_t;
@@ -45,10 +45,13 @@ typedef struct {
     uint8_t dly_on, rev_on;
     uint8_t rev_size;                    /* 0..9: tamaño de la sala */
     uint8_t rev_tone;                    /* 0..9: oscura .. brillante */
-    uint8_t env_a, env_d, env_s, env_r;
+    uint8_t env_a, env_d, env_s, env_r;  /* la envolvente del pad: ataque, caída (0..9), sostenido (0..10), release (0..9) */
     uint8_t aenv_a, aenv_d, aenv_s, aenv_r;   /* la envolvente del arpegio, igual */
     uint8_t benv_a, benv_d, benv_s, benv_r;   /* la del bajo (el de siempre y el arpegiado) */
-    uint8_t arp_dest;                    /* qué suena al paso: 0 el arpegio, 1 el bajo repitiendo su nota, 2 los dos */  /* la envolvente del pad: ataque, caída (0..9), sostenido (0..10), release (0..9) */
+    uint8_t bp_on;                       /* bajo pulsado: el bajo repite su nota al tempo */
+    uint8_t bp_div;                      /* 0..3: 1/4 1/8 1/8T 1/16 */
+    uint8_t bp_pat;                      /* 0 la nota, 1 octavas, 2 quinta */
+    uint8_t bp_len;                      /* 1..9: duración de cada nota, en décimas del paso */
     uint8_t cur_bank;                    /* el banco elegido: REC graba en él, PLAY lo toca */
     loop_t bank[NBANK];
 } settings_t;
@@ -65,7 +68,8 @@ static const unsigned BK_MOD[8] = {BL_MOD_FLIP, BL_MOD_7, BL_MOD_MAJ7, BL_MOD_SU
 static const uint8_t WK[16] = PLAT_WHITE_KEYS, BK[11] = PLAT_BLACK_KEYS;
 static const char *const ARP_MODE_NAME[4] = {"SUBE", "BAJA", "S-B", "AZAR"};
 static const char *const ARP_DIV_NAME[3] = {"1/8", "1/8T", "1/16"};
-static const char *const ARP_DEST_NAME[3] = {"ARPEGIO", "BAJO", "LOS DOS"};
+static const char *const BP_DIV_NAME[4] = {"1/4", "1/8", "1/8T", "1/16"};
+static const char *const BP_PAT_NAME[3] = {"NOTA", "OCTAVAS", "QUINTA"};
 static const char *const DLY_DIV_NAME[6] = {"1/16", "1/8", "1/8.", "1/4", "1/4.", "1/2"};
 static const float DLY_BEATS[6] = {0.25f, 0.5f, 0.75f, 1.0f, 1.5f, 2.0f};
 #define NDEG 7
@@ -166,7 +170,7 @@ static void take_chord(const snd_chord *c)
             used[best] = 1;
         }
     {
-        int g = c->gate && !set.arp;          /* con arpegio, sin bajo */
+        int g = c->gate && !set.arp && !set.bp_on;   /* con arpegio o bajo pulsado, sin bajo sostenido */
         if (g && (!bass_gate || c->bass != bass_note)) bass_stage = 0;   /* nota nueva: ataque */
         bass_gate = g;
         bass_note = c->bass;
@@ -286,7 +290,7 @@ static int arp_note(uint32_t i)
     return clamp(achord.notes[k % n] + 12 * (k / n), 0, 127);
 }
 
-static void arp_voice(int note, int low, float step)
+static void arp_voice(int note, int low, float step, int len)
 {
     plk_v *p = &plk[plk_next++ % NPLK];
     if (p->left > 0) midi_ch(0x80u, p->low ? 3u : 4u, p->note, 0);
@@ -297,7 +301,7 @@ static void arp_voice(int note, int low, float step)
     p->stage = 0;
     p->low = (uint8_t)low;
     p->note = (uint8_t)note;
-    p->left = (int32_t)(step * (float)set.arp_len / 10.0f);
+    p->left = (int32_t)(step * (float)len / 10.0f);
     if (p->left < 1) p->left = 1;
     midi_ch(0x90u, low ? 3u : 4u, (uint32_t)note, 100);
 }
@@ -306,16 +310,32 @@ static void arp_fire(float step)
 {
     int note = arp_note(arp_i++);
     if (note < 0) return;
-    if (set.arp_dest != 1) arp_voice(note, 0, step);                         /* agudo */
-    if (set.arp_dest != 0) arp_voice(achord.bass, 1, step);                  /* bajo: repite su nota a cada paso */
+    arp_voice(note, 0, step, set.arp_len);
     arp_steps++;
 }
 
-static void arp_release_all(void)
+static void arp_release(int low)        /* las voces del arpegio (low 0) o del bajo pulsado (low 1) */
 {
     int j;
     for (j = 0; j < NPLK; j++)
-        if (plk[j].left > 0) plk[j].left = 1;   /* se sueltan en la siguiente muestra (y su note off) */
+        if (plk[j].left > 0 && plk[j].low == low) plk[j].left = 1;   /* se sueltan en la siguiente muestra (y su note off) */
+}
+#define arp_release_all() arp_release(0)
+
+/* el bajo pulsado: su paso y su nota (la del bajo; con octavas o quinta, uno sí y otro no) */
+static float bp_cnt;
+static uint32_t bp_i;
+static int bp_was;
+static float bp_step_len(void)
+{
+    static const float PER_BEAT[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+    return SR * 60.0f / (float)set.tempo / PER_BEAT[set.bp_div % 4u];
+}
+static void bp_fire(float step)
+{
+    int note = achord.bass;
+    if (bp_i++ & 1u) note += set.bp_pat == 1 ? 12 : set.bp_pat == 2 ? 7 : 0;
+    arp_voice(clamp(note, 0, 127), 1, step, set.bp_len);
 }
 
 static float e_att, e_dec, e_rel, e_sus;
@@ -352,29 +372,41 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     }
     take_plucks();
     {   /* el arpegiador encendido o apagado: el pad entra o sale, el reloj MIDI arranca o para */
-        int on = set.arp != 0;
-        if (set.arp != arp_was) {              /* solo / con pad / apagado: el pad y el bajo entran o salen */
-            int was = arp_was != 0;
+        int on = set.arp != 0, bon = set.bp_on != 0;
+        int run = on || bon, ran = arp_was != 0 || bp_was;   /* algo va al tempo: reloj MIDI */
+        if (set.arp != arp_was || bon != bp_was) {   /* el pad y el bajo entran o salen */
             arp_was = set.arp;
+            bp_was = bon;
             take_chord(&achord);
-            if (on && !was) { midi_rt(0xFAu); clk_cnt = 0.0f; arp_cnt = 0.0f; arp_i = 0; }
-            else if (!on && was) { midi_rt(0xFCu); arp_release_all(); }
+            if (run && !ran) { midi_rt(0xFAu); clk_cnt = 0.0f; }
+            else if (!run && ran) midi_rt(0xFCu);
+            if (!on) arp_release(0);
+            if (!bon) arp_release(1);
         }
         if (!on || !achord.gate) {
-            if (achord.gate == 0) arp_release_all();
+            if (achord.gate == 0) arp_release(0);
             arp_cnt = 0.0f;                  /* el siguiente acorde arranca el arpegio en el acto */
             arp_i = 0;
+        }
+        if (!bon || !achord.gate) {
+            if (achord.gate == 0) arp_release(1);
+            bp_cnt = 0.0f;
+            bp_i = 0;
         }
     }
     { uint32_t pkt; int port; while (plat_midi_in(&pkt, &port)) {} }   /* (la entrada MIDI llegará más adelante) */
     for (i = 0; i < n; i++) {
         float l = 0.0f, r = 0.0f, b, s, lowsum = 0.0f;
-        if (set.arp) {
+        if (set.arp || set.bp_on) {
             clk_cnt -= 1.0f;
             if (clk_cnt <= 0.0f) { clk_cnt += SR * 60.0f / (float)set.tempo / 24.0f; midi_rt(0xF8u); }
-            if (achord.gate) {
+            if (achord.gate && set.arp) {
                 arp_cnt -= 1.0f;
                 if (arp_cnt <= 0.0f) { float step = arp_step_len(); arp_cnt += step; arp_fire(step); }
+            }
+            if (achord.gate && set.bp_on) {
+                bp_cnt -= 1.0f;
+                if (bp_cnt <= 0.0f) { float step = bp_step_len(); bp_cnt += step; bp_fire(step); }
             }
         }
         for (j = 0; j < NPAD; j++) {
@@ -522,7 +554,10 @@ static void settings_defaults(void)
     set.aenv_d = 6;
     set.aenv_s = 0;
     set.aenv_r = 1;
-    set.arp_dest = 0;
+    set.bp_on = 0;
+    set.bp_div = 1;
+    set.bp_pat = 0;
+    set.bp_len = 5;
     set.benv_a = 3;                          /* el bajo, como sonaba: ~20 ms de ataque, ~65 ms de release */
     set.benv_d = 5;
     set.benv_s = 10;
@@ -554,7 +589,7 @@ static void settings_load(void)
         || set.dly_mix > 10u || set.dly_div > 5u || set.dly_fb > 9u || set.rev_mix > 10u
         || set.dly_on > 1u || set.rev_on > 1u || set.rev_size > 9u || set.rev_tone > 9u
         || set.env_a > 9u || set.env_d > 9u || set.env_s > 10u || set.env_r > 9u
-        || set.aenv_a > 9u || set.aenv_d > 9u || set.aenv_s > 10u || set.aenv_r > 9u || set.arp_dest > 2u
+        || set.aenv_a > 9u || set.aenv_d > 9u || set.aenv_s > 10u || set.aenv_r > 9u || set.bp_on > 1u || set.bp_div > 3u || set.bp_pat > 2u || set.bp_len < 1u || set.bp_len > 9u
         || set.benv_a > 9u || set.benv_d > 9u || set.benv_s > 10u || set.benv_r > 9u
         || set.cur_bank >= NBANK || !banks_ok())
         settings_defaults();
@@ -656,7 +691,7 @@ static void chord_notes_on(void)
 {
     int i;
     for (i = 0; i < st.cur.n; i++) midi(0x90u, 2, st.cur.notes[i], 100);
-    midi(0x90u, 3, st.cur.bass, 100);
+    if (!set.arp && !set.bp_on) midi(0x90u, 3, st.cur.bass, 100);   /* el bajo sostenido, solo si suena */
 }
 
 /* El acorde según lo que se tiene pulsado. Se llama en cada pasada; solo actúa si algo cambió. */
@@ -912,6 +947,9 @@ static void input(void)
             } else {
                 app_say(t, REC_LOOP.len ? "" : "VACIO");
             }
+        } else if (k == B_SEL) {
+            st.page = st.page == 7 ? 0 : 7;  /* los knobs, al bajo pulsado (y vuelta) */
+            app_say("BAJO PULSADO", st.page == 7 ? (set.bp_on ? "SI" : "NO (K1)") : "");
         } else if (k == B_ENV) {
             st.page = st.page == 4 ? 5 : st.page == 5 ? 6 : st.page == 6 ? 0 : 4;   /* pad, arpegio, bajo, y fuera */
             app_say("ENVOLVENTE", st.page == 4 ? "PAD" : st.page == 5 ? "ARPEGIO" : st.page == 6 ? "BAJO" : "NO");
@@ -1022,9 +1060,21 @@ static void input(void)
                 time_text(env_rel_s(*er), t);
                 set_changed("RELEASE", t);
             }
-        } else if (k == EN_ALGO && ((btn >> B_ARP & 1u) || st.page == 1)) {   /* qué se arpegia */
-            set.arp_dest = (uint8_t)clamp((int32_t)set.arp_dest + e, 0, 2);
-            set_changed("ARPEGIA", ARP_DEST_NAME[set.arp_dest]);
+        } else if (st.page == 7 && k >= EN_K1) {   /* BAJO PULSADO */
+            if (k == EN_K1) {
+                set.bp_on = e > 0;
+                set_changed("BAJO PULSADO", set.bp_on ? "SI" : "NO");
+            } else if (k == EN_K2) {
+                set.bp_div = (uint8_t)clamp((int32_t)set.bp_div + e, 0, 3);
+                set_changed("BAJO PASO", BP_DIV_NAME[set.bp_div]);
+            } else if (k == EN_K3) {
+                set.bp_pat = (uint8_t)clamp((int32_t)set.bp_pat + e, 0, 2);
+                set_changed("BAJO PATRON", BP_PAT_NAME[set.bp_pat]);
+            } else {
+                set.bp_len = (uint8_t)clamp((int32_t)set.bp_len + e, 1, 9);
+                int_text(set.bp_len * 10, t); text_cat(t, "%");
+                set_changed("BAJO LARGO", t);
+            }
         } else if (k == EN_SELECT) {
             set.tempo = (uint8_t)clamp((int32_t)set.tempo + e, 40, 220);
             int_text(set.tempo, t);
@@ -1058,7 +1108,8 @@ static void input(void)
     plat_glow(1);
     {
         uint32_t lit = btn | (set_dirty ? 1u << B_SAVE : 0u) | (set.arp ? 1u << B_ARP : 0u)
-                       | (st.page == 2 || st.page == 3 ? 1u << B_FX : 0u) | (st.page >= 4 && st.page <= 6 ? 1u << B_ENV : 0u);
+                       | (st.page == 2 || st.page == 3 ? 1u << B_FX : 0u) | (st.page >= 4 && st.page <= 6 ? 1u << B_ENV : 0u)
+                       | (st.page == 7 ? 1u << B_SEL : 0u);
         if (st.playing || st.rec == 2) lit |= 1u << B_PLAY;
         if (st.rec == 2 || (st.rec == 1 && (plat_ms() / 250u) & 1u)) lit |= 1u << B_REC;   /* armado: parpadea */
         plat_play_red(st.rec == 2);
@@ -1120,11 +1171,10 @@ static void draw(void)
                 cv_rect(x, y, 9, 9, fill);
             }
         }
-        if (set.arp) {                       /* el arpegiador: modo, qué arpegia y tempo, a la derecha */
+        if (set.arp || set.bp_on) {          /* el arpegiador, el bajo pulsado y el tempo, a la derecha */
             char b[24] = "", n[8];
-            text_cat(b, set.arp == 2 ? "ARP+PAD" : "ARP");
-            if (set.arp_dest) text_cat(b, set.arp_dest == 1 ? " BAJO" : " x2");
-            text_cat(b, " ");
+            if (set.arp) text_cat(b, set.arp == 2 ? "ARP+PAD " : "ARP ");
+            if (set.bp_on) text_cat(b, "BAJO ");
             int_text(set.tempo, n);
             text_cat(b, n);
             cv_text(234 - text_w(&FONT_XS, b), 44, &FONT_XS, b, C_HI);
@@ -1187,7 +1237,18 @@ static void draw(void)
         chip(i < 6 ? 2 + i * 40 : 2 + (i - 6) * 48, i < 6 ? 22 : 42, i < 6 ? 38 : 46, BK_LABEL[i], on);
     }
     cv_rect(0, 64, 240, 1, C_LINE);
-    if (st.page >= 4 && st.page <= 6 && !(st.btn >> B_ARP & 1u)) {   /* los knobs de una envolvente */
+    if (st.page == 7 && !(st.btn >> B_ARP & 1u)) {   /* los knobs del bajo pulsado */
+        static const char *const LBL[4] = {"BAJO", "K2 PASO", "K3 PATRON", "K4 LARGO"};
+        char v[4][12];
+        v[0][0] = 0; text_cat(v[0], set.bp_on ? "K1 SI" : "K1 NO");
+        v[1][0] = 0; text_cat(v[1], BP_DIV_NAME[set.bp_div]);
+        v[2][0] = 0; text_cat(v[2], BP_PAT_NAME[set.bp_pat]);
+        int_text(set.bp_len * 10, v[3]); text_cat(v[3], "%");
+        for (i = 0; i < 4; i++) {
+            cv_text(4 + i * 60, 68, &FONT_XS, LBL[i], C_AMB);
+            cv_text(4 + i * 60, 81, &FONT_XS, v[i], C_WHITE);
+        }
+    } else if (st.page >= 4 && st.page <= 6 && !(st.btn >> B_ARP & 1u)) {   /* los knobs de una envolvente */
         static const char *const LP[4] = {"PAD ATAQ", "PAD CAIDA", "PAD SOST", "PAD REL"};
         static const char *const LA[4] = {"ARP ATAQ", "ARP CAIDA", "ARP SOST", "ARP REL"};
         static const char *const LB[4] = {"BAJO ATAQ", "BAJO CAIDA", "BAJO SOST", "BAJO REL"};
@@ -1296,7 +1357,8 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "rev_on")) *got = set.rev_on;
     else if (!strcmp(what, "rev_size")) *got = set.rev_size;
     else if (!strcmp(what, "env_s")) *got = set.env_s;
-    else if (!strcmp(what, "arp_dest")) *got = set.arp_dest;
+    else if (!strcmp(what, "bp_on")) *got = set.bp_on;
+    else if (!strcmp(what, "bp_pat")) *got = set.bp_pat;
     else if (!strcmp(what, "benv_s")) *got = set.benv_s;
     else if (!strcmp(what, "low_note_is_bass")) {   /* todas las voces de bajo suenan la nota del bajo */
         int j, ok = 1, any = 0;

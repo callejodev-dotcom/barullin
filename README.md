@@ -16,9 +16,9 @@ Construido sobre [fm1-base](https://github.com/charlesvestal/fm1-base) de Charle
 | PRESET | Encadenar acordes (voice leading) sí o no |
 | ARP (pulsar) | Por pasos: 1, solo arpegio (sin pad ni bajo); 2, arpegio + pad; 3, apagado. Encendido, K1–K4 son del arpegiador |
 | FX | Por pasos: 1, DELAY (K1 sí/no, K2 tiempo al tempo de 1/16 a 1/2, K3 repeticiones, K4 mezcla); 2, REVERB (K1 sí/no, K2 tamaño, K3 tono, K4 mezcla); 3, los knobs vuelven |
+| SEL | Bajo pulsado: los knobs pasan a K1 sí/no, K2 paso (1/4, 1/8, 1/8T, 1/16), K3 patrón (nota, octavas, quinta), K4 duración. Independiente del arpegiador; MIDI canal 3. SEL otra vez los devuelve |
 | ENV | Por pasos: 1, envolvente del pad; 2, del arpegio; 3, del bajo (el de siempre y el arpegiado); 4, fuera. K1 ataque (2 ms–2 s), K2 caída (50 ms–3 s), K3 sostenido (0–100 %), K4 release (20 ms–4 s) |
 | HOME | Los knobs vuelven al acorde (el arpegio y los efectos siguen). Después, ARP o FX vuelven a la página donde estabas, sin cambiar nada |
-| ALGORITHM (página del arpegiador) | Qué suena al paso: ARPEGIO; BAJO (repite la nota del bajo a cada paso, seco, MIDI canal 3); o LOS DOS |
 | ARP mantenido + K1 / K2 / K3 / K4 | Modo (sube, baja, sube-baja, azar) / paso (1/8, 1/8T, 1/16) / octavas (1–3) / duración de cada nota |
 | SELECT | Tempo (40–220 BPM) |
 | REC | Graba una idea: empieza con el primer acorde que toques; REC otra vez la cierra (a compases enteros) y la pone en bucle |
