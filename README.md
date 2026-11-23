@@ -14,12 +14,15 @@ Construido sobre [fm1-base](https://github.com/charlesvestal/fm1-base) de Charle
 | Última tecla negra | STOP: pulsación corta para el acorde; mantenida un segundo activa o quita el HOLD (activado por defecto: el acorde sigue sonando al soltar) |
 | K1 / K2 / K3 / K4 | Tonalidad / modo / octava / brillo del pad |
 | PRESET | Encadenar acordes (voice leading) sí o no |
+| ARP (pulsar) | Arpegiador sí o no: el acorde suena nota a nota en vez de como pad |
+| ARP mantenido + K1 / K2 / K3 / K4 | Modo (sube, baja, sube-baja, azar) / paso (1/8, 1/8T, 1/16) / octavas (1–3) / duración de cada nota |
+| SELECT | Tempo (40–220 BPM) |
 | OCT− / OCT+ | Octava |
 | SAVE | Guarda los ajustes |
 
 Los modificadores se combinan: `7` + `9` da maj9, m9 o 9 según el grado; `sus4` + `7` da 7sus4.
 
-**MIDI de salida** (USB y Bluetooth): rasgueo en el canal 1, acorde en el 2, bajo en el 3.
+**MIDI de salida** (USB y Bluetooth): rasgueo en el canal 1, acorde en el 2, bajo en el 3, arpegio en el 4; con el arpegiador encendido, reloj MIDI con start/stop.
 
 ## Estructura
 
@@ -51,7 +54,7 @@ python3 base/tools/fm1_install.py app/build/barullin.fwsc         # instalar en 
 
 - [x] Acordes por grados, modos y modificadores, con voice leading
 - [x] Rasgueo, bajo y pad; salida MIDI
-- [ ] Arpegiador sincronizado
+- [x] Arpegiador con reloj MIDI
 - [ ] Ritmos de acompañamiento
 - [ ] Secuenciador de progresiones
 - [ ] Reloj MIDI y start/stop para el directo

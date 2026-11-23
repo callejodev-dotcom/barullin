@@ -14,7 +14,7 @@
 #define SR 44100.0f
 
 /* ------------------------------------------------------------- ajustes --- */
-#define SET_MAGIC 0x42524C32u            /* "BRL2" */
+#define SET_MAGIC 0x42524C33u            /* "BRL3" */
 typedef struct {
     uint32_t magic;
     uint8_t key;                         /* 0 = C .. 11 = B */
@@ -23,6 +23,12 @@ typedef struct {
     uint8_t bright;                      /* 0..20: el corte del filtro del pad */
     uint8_t lead;                        /* voice leading */
     uint8_t hold;                        /* el acorde sigue al soltar (por defecto, sí) */
+    uint8_t arp;                         /* arpegiador */
+    uint8_t arp_mode;                    /* 0 sube, 1 baja, 2 sube-baja, 3 azar */
+    uint8_t arp_div;                     /* 0 corcheas, 1 tresillos, 2 semicorcheas */
+    uint8_t arp_oct;                     /* 1..3 octavas */
+    uint8_t arp_len;                     /* 1..9: duración de cada nota, en décimas del paso */
+    uint8_t tempo;                       /* 40..220 BPM */
     uint8_t rsv[2];
 } settings_t;
 static settings_t set;
@@ -36,6 +42,8 @@ static const char *const BK_LABEL[NBK] = {"m/M", "7", "M7", "s2", "s4", "9", "6"
 static const unsigned BK_MOD[8] = {BL_MOD_FLIP, BL_MOD_7, BL_MOD_MAJ7, BL_MOD_SUS2,
                                    BL_MOD_SUS4, BL_MOD_9, BL_MOD_6, BL_MOD_DIMAUG};
 static const uint8_t WK[16] = PLAT_WHITE_KEYS, BK[11] = PLAT_BLACK_KEYS;
+static const char *const ARP_MODE_NAME[4] = {"SUBE", "BAJA", "S-B", "AZAR"};
+static const char *const ARP_DIV_NAME[3] = {"1/8", "1/8T", "1/16"};
 #define NDEG 7
 #define NSTRUM 9
 
@@ -77,13 +85,22 @@ static void pluck(int note, int vel)
 #define NPAD 6
 #define NPLK 8
 typedef struct { float p1, p2, i1, i2, env; int note, gate; } pad_v;
-typedef struct { float ph, inc, env, amp; } plk_v;
+typedef struct {
+    float ph, inc, env, amp;
+    int32_t left;                        /* arpegio: muestras que le quedan sonando; -1 un rasgueo (se apaga solo) */
+    uint8_t note;
+} plk_v;
 static pad_v pad[NPAD];
 static plk_v plk[NPLK];
 static float bass_ph, bass_inc, bass_env;
 static int bass_gate;
 static float lp1[2], lp2[2], gain_now;
 static uint32_t snd_seen, plq_r, plk_next;
+static snd_chord achord;                 /* el acorde según el audio (para el arpegio) */
+static int arp_was;                      /* el arpegiador sonaba en el bloque anterior */
+static float arp_cnt, clk_cnt;           /* muestras hasta el siguiente paso / pulso de reloj MIDI */
+static uint32_t arp_i, arp_rng = 0x1234567u;
+static volatile uint32_t arp_steps;      /* pasos tocados (para las pruebas) */
 
 static float note_inc(int note) { return 440.0f * fm_exp2f((float)(note - 69) / 12.0f) / SR; }
 
@@ -91,15 +108,17 @@ static float note_inc(int note) { return 440.0f * fm_exp2f((float)(note - 69) / 
 static void take_chord(const snd_chord *c)
 {
     int i, j, used[NPAD] = {0};
+    int pad_gate = c->gate && !set.arp;  /* con arpegio, el pad calla: el acorde va nota a nota */
+    if (c != &achord) achord = *c;
     for (j = 0; j < NPAD; j++) {
         int keep = 0;
-        if (c->gate && pad[j].gate)
+        if (pad_gate && pad[j].gate)
             for (i = 0; i < c->n; i++)
                 if (pad[j].note == c->notes[i]) keep = 1;
         if (!keep) pad[j].gate = 0;
         else used[j] = 1;
     }
-    if (c->gate)
+    if (pad_gate)
         for (i = 0; i < c->n; i++) {
             int have = 0, best = -1;
             for (j = 0; j < NPAD; j++)
@@ -127,8 +146,67 @@ static void take_plucks(void)
         p->inc = note_inc(plq_note[plq_r % NPLQ]);
         p->amp = 0.12f + 0.20f * (float)plq_vel[plq_r % NPLQ] / 127.0f;
         p->env = 1.0f;
+        p->left = -1;
         plq_r++;
     }
+}
+
+/* ----------------------------------------------------------- arpegio --- */
+static void midi_rt(uint32_t b) { plat_midi_send(0x0Fu | b << 8, TO_USB | TO_BLE); }   /* reloj, start, stop */
+static void midi_ch(uint32_t st_, uint32_t ch, uint32_t d1, uint32_t d2)
+{
+    plat_midi_send((st_ >> 4) | (st_ | (ch - 1u)) << 8 | d1 << 16 | d2 << 24, TO_USB | TO_BLE);
+}
+
+static float arp_step_len(void)
+{
+    static const float PER_BEAT[3] = {2.0f, 3.0f, 4.0f};
+    return SR * 60.0f / (float)set.tempo / PER_BEAT[set.arp_div % 3u];
+}
+
+/* la nota del paso i: las notas del acorde, repetidas en arp_oct octavas, en el orden del modo */
+static int arp_note(uint32_t i)
+{
+    int n = achord.n, len = n * (int)set.arp_oct, k, period;
+    if (n == 0) return -1;
+    switch (set.arp_mode) {
+    case 1: k = len - 1 - (int)(i % (uint32_t)len); break;
+    case 2:
+        period = len > 1 ? 2 * len - 2 : 1;
+        k = (int)(i % (uint32_t)period);
+        if (k >= len) k = period - k;
+        break;
+    case 3:
+        arp_rng = arp_rng * 1664525u + 1013904223u;
+        k = (int)((arp_rng >> 16) % (uint32_t)len);
+        break;
+    default: k = (int)(i % (uint32_t)len); break;
+    }
+    return clamp(achord.notes[k % n] + 12 * (k / n), 0, 127);
+}
+
+static void arp_fire(float step)
+{
+    int note = arp_note(arp_i++);
+    plk_v *p = &plk[plk_next++ % NPLK];
+    if (note < 0) return;
+    if (p->left > 0) midi_ch(0x80u, 4, p->note, 0);
+    p->ph = 0.0f;
+    p->inc = note_inc(note);
+    p->amp = 0.26f;
+    p->env = 1.0f;
+    p->note = (uint8_t)note;
+    p->left = (int32_t)(step * (float)set.arp_len / 10.0f);
+    if (p->left < 1) p->left = 1;
+    midi_ch(0x90u, 4, (uint32_t)note, 100);
+    arp_steps++;
+}
+
+static void arp_release_all(void)
+{
+    int j;
+    for (j = 0; j < NPLK; j++)
+        if (plk[j].left > 0) plk[j].left = 1;   /* se sueltan en la siguiente muestra (y su note off) */
 }
 
 void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
@@ -142,9 +220,31 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         take_chord(&snd_buf[seq & 1u]);
     }
     take_plucks();
+    {   /* el arpegiador encendido o apagado: el pad entra o sale, el reloj MIDI arranca o para */
+        int on = set.arp != 0;
+        if (on != arp_was) {
+            arp_was = on;
+            take_chord(&achord);
+            if (on) { midi_rt(0xFAu); clk_cnt = 0.0f; arp_cnt = 0.0f; arp_i = 0; }
+            else { midi_rt(0xFCu); arp_release_all(); }
+        }
+        if (!on || !achord.gate) {
+            if (achord.gate == 0) arp_release_all();
+            arp_cnt = 0.0f;                  /* el siguiente acorde arranca el arpegio en el acto */
+            arp_i = 0;
+        }
+    }
     { uint32_t pkt; int port; while (plat_midi_in(&pkt, &port)) {} }   /* (la entrada MIDI llegará más adelante) */
     for (i = 0; i < n; i++) {
         float l = 0.0f, r = 0.0f, b, s;
+        if (set.arp) {
+            clk_cnt -= 1.0f;
+            if (clk_cnt <= 0.0f) { clk_cnt += SR * 60.0f / (float)set.tempo / 24.0f; midi_rt(0xF8u); }
+            if (achord.gate) {
+                arp_cnt -= 1.0f;
+                if (arp_cnt <= 0.0f) { float step = arp_step_len(); arp_cnt += step; arp_fire(step); }
+            }
+        }
         for (j = 0; j < NPAD; j++) {
             pad_v *v = &pad[j];
             if (v->gate) { v->env += 1.0f / (0.08f * SR); if (v->env > 1.0f) v->env = 1.0f; }
@@ -174,7 +274,11 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             if (p->env < 0.0005f) continue;
             p->ph += p->inc; if (p->ph >= 1.0f) p->ph -= 1.0f;
             s = (fm_sinf(p->ph * 6.2831853f) + 0.35f * fm_sinf(p->ph * 12.566371f)) * p->env * p->amp;
-            p->env *= 0.99990f;
+            if (p->left < 0) p->env *= 0.99990f;            /* rasgueo: se apaga solo */
+            else if (p->left > 0) {                           /* arpegio: suena su parte del paso */
+                p->env *= 0.99997f;
+                if (--p->left == 0) midi_ch(0x80u, 4, p->note, 0);
+            } else p->env *= 0.9990f;                         /* y se suelta rápido */
             l += s * 1.1f; r += s * 0.9f;
         }
         gain_now += (gain - gain_now) * 0.004f;
@@ -187,7 +291,7 @@ void app_panic(void)
 {
     int j;
     for (j = 0; j < NPAD; j++) pad[j].gate = 0, pad[j].env = 0.0f;
-    for (j = 0; j < NPLK; j++) plk[j].env = 0.0f;
+    for (j = 0; j < NPLK; j++) plk[j].env = 0.0f, plk[j].left = -1;
     bass_gate = 0;
     bass_env = 0.0f;
 }
@@ -208,6 +312,7 @@ static struct {
     uint32_t keys, btn;
     uint8_t redraw;
     uint8_t gate_hold_off;
+    uint8_t arp_turned;                  /* con ARP mantenido se giró un knob: al soltar no se conmuta */
     uint32_t stop_t;                     /* la tecla STOP bajó (0: no está pulsada, o ya actuó)
                                           * corta: para el acorde; un segundo: HOLD sí / no */
 } st;
@@ -227,13 +332,21 @@ static void settings_defaults(void)
     set.bright = 10;
     set.lead = 1;
     set.hold = 1;
+    set.arp = 0;
+    set.arp_mode = 0;
+    set.arp_div = 0;
+    set.arp_oct = 1;
+    set.arp_len = 5;
+    set.tempo = 100;
 }
 
 static void settings_load(void)
 {
     if (plat_store_load(OBJ_SETTINGS, &set, sizeof set) != (int)sizeof set || set.magic != SET_MAGIC
         || set.key > 11u || set.mode >= BL_MODE_COUNT || set.octave < -2 || set.octave > 2
-        || set.bright > 20u || set.lead > 1u || set.hold > 1u)
+        || set.bright > 20u || set.lead > 1u || set.hold > 1u
+        || set.arp > 1u || set.arp_mode > 3u || set.arp_div > 2u || set.arp_oct < 1u || set.arp_oct > 3u
+        || set.arp_len < 1u || set.arp_len > 9u || set.tempo < 40u || set.tempo > 220u)
         settings_defaults();
 }
 
@@ -435,17 +548,46 @@ static void input(void)
             set.octave = (int8_t)(set.octave + (k == B_OCTUP ? 1 : -1));
             int_text(set.octave, t);
             set_changed("OCTAVA", t);
+        } else if (k == B_ARP) {
+            st.arp_turned = 0;               /* conmuta al soltar, si no se tocó ningún knob */
         } else if (k == B_SAVE) {
             if (plat_store_save(OBJ_SETTINGS, &set, sizeof set) == 0) { set_dirty = 0; app_say("GUARDADO", ""); }
             else app_say("GUARDAR", "FALLO");
         }
     }
 
-    /* potenciómetros */
+    if (!(btn >> B_ARP & 1u) && (st.btn >> B_ARP & 1u) && !st.arp_turned) {
+        set.arp = (uint8_t)!set.arp;
+        set_changed("ARPEGIO", set.arp ? "SI" : "NO");
+    }
+
+    /* potenciómetros (con ARP mantenido, K1..K4 son del arpegiador) */
     for (k = 0; k < NE; k++) {
         char t[24];
         if ((e = plat_enc((int)k)) == 0) continue;
-        if (k == EN_K1) {
+        if ((btn >> B_ARP & 1u) && k >= EN_K1) {
+            st.arp_turned = 1;
+            if (k == EN_K1) {
+                set.arp_mode = (uint8_t)clamp((int32_t)set.arp_mode + e, 0, 3);
+                set_changed("ARP MODO", ARP_MODE_NAME[set.arp_mode]);
+            } else if (k == EN_K2) {
+                set.arp_div = (uint8_t)clamp((int32_t)set.arp_div + e, 0, 2);
+                set_changed("ARP PASO", ARP_DIV_NAME[set.arp_div]);
+            } else if (k == EN_K3) {
+                set.arp_oct = (uint8_t)clamp((int32_t)set.arp_oct + e, 1, 3);
+                int_text(set.arp_oct, t);
+                set_changed("ARP OCTAVAS", t);
+            } else {
+                set.arp_len = (uint8_t)clamp((int32_t)set.arp_len + e, 1, 9);
+                int_text(set.arp_len * 10, t);
+                text_cat(t, "%");
+                set_changed("ARP LARGO", t);
+            }
+        } else if (k == EN_SELECT) {
+            set.tempo = (uint8_t)clamp((int32_t)set.tempo + e, 40, 220);
+            int_text(set.tempo, t);
+            set_changed("TEMPO", t);
+        } else if (k == EN_K1) {
             set.key = (uint8_t)(((int)set.key + e % 12 + 12) % 12);
             key_text(t);
             set_changed("TONO", t);
@@ -472,7 +614,7 @@ static void input(void)
     st.keys = keys;
     st.btn = btn;
     plat_glow(1);
-    plat_leds(btn | (set_dirty ? 1u << B_SAVE : 0u), keys);
+    plat_leds(btn | (set_dirty ? 1u << B_SAVE : 0u) | (set.arp ? 1u << B_ARP : 0u), keys);
 }
 
 void app_input_only(void) { input(); }
@@ -497,7 +639,13 @@ static void draw(void)
         cv_text(x + 8, 7, &FONT_B, st.msg[1], C_HI);
     } else {
         int32_t x = cv_text(8, 7, &FONT_B, "BARULLIN", C_WHITE);
-        if (set.hold) cv_text(x + 8, 9, &FONT_XS, "HOLD", C_AMB);
+        if (set.hold) x = cv_text(x + 8, 9, &FONT_XS, "HOLD", C_AMB);
+        if (set.arp) {
+            char b[12] = "ARP ";
+            int_text(set.tempo, t);
+            text_cat(b, t);
+            cv_text(x + 8, 9, &FONT_XS, b, C_HI);
+        }
         key_text(t);
         cv_text(232 - text_w(&FONT_B, t), 7, &FONT_B, t, C_HI);
     }
@@ -556,7 +704,18 @@ static void draw(void)
         chip(i < 6 ? 2 + i * 40 : 2 + (i - 6) * 48, i < 6 ? 22 : 42, i < 6 ? 38 : 46, BK_LABEL[i], on);
     }
     cv_rect(0, 64, 240, 1, C_LINE);
-    {
+    if (st.btn >> B_ARP & 1u) {          /* ARP mantenido: los knobs del arpegiador */
+        static const char *const LBL[4] = {"K1 MODO", "K2 PASO", "K3 OCTS", "K4 LARGO"};
+        char v[4][12];
+        v[0][0] = 0; text_cat(v[0], ARP_MODE_NAME[set.arp_mode]);
+        v[1][0] = 0; text_cat(v[1], ARP_DIV_NAME[set.arp_div]);
+        int_text(set.arp_oct, v[2]);
+        int_text(set.arp_len * 10, v[3]); text_cat(v[3], "%");
+        for (i = 0; i < 4; i++) {
+            cv_text(4 + i * 60, 68, &FONT_XS, LBL[i], C_AMB);
+            cv_text(4 + i * 60, 81, &FONT_XS, v[i], C_WHITE);
+        }
+    } else {
         static const char *const LBL[4] = {"K1 TONO", "K2 MODO", "K3 OCT", "K4 BRILLO"};
         char v[4][12];
         v[0][0] = 0; text_cat(v[0], bl_note_name(set.key, set.key));
@@ -610,6 +769,10 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "mode")) *got = set.mode;
     else if (!strcmp(what, "hold")) *got = set.hold;
     else if (!strcmp(what, "dirty")) *got = set_dirty;
+    else if (!strcmp(what, "arp")) *got = set.arp;
+    else if (!strcmp(what, "arp_mode")) *got = set.arp_mode;
+    else if (!strcmp(what, "tempo")) *got = set.tempo;
+    else if (!strcmp(what, "arp_moving")) *got = arp_steps >= 4u;   /* al menos cuatro pasos tocados */
     else return 0;
     return 1;
 }

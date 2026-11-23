@@ -93,3 +93,32 @@ reboot
 wait 600
 expect key 2
 expect mode 1
+# --- arpegiador ---
+expect arp 0
+tap ARP
+wait 30
+expect arp 1
+turn SELECT 20
+wait 30
+expect tempo 120
+key 0 down
+wait 30
+key 0 up
+wav arp.wav
+wait 1500
+wavstop
+expect arp_moving 1
+expect peak_db_min -30
+# ARP mantenido: K1 cambia el modo y al soltar el arpegiador sigue encendido
+press ARP
+turn K1 2
+wait 30
+shot arp_knobs.png
+release ARP
+wait 30
+expect arp_mode 2
+expect arp 1
+shot arp.png
+tap ARP
+wait 30
+expect arp 0
