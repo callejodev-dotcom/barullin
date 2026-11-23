@@ -20,9 +20,10 @@ Construido sobre [fm1-base](https://github.com/charlesvestal/fm1-base) de Charle
 | ARP mantenido + K1 / K2 / K3 / K4 | Modo (sube, baja, sube-baja, azar) / paso (1/8, 1/8T, 1/16) / octavas (1–3) / duración de cada nota |
 | SELECT | Tempo (40–220 BPM) |
 | REC | Graba una idea: empieza con el primer acorde que toques; REC otra vez la cierra (a compases enteros) y la pone en bucle |
-| PLAY | Reproduce o para la idea grabada. Mientras suena, lo que toques en directo manda |
+| PLAY | Reproduce o para la idea del banco. Mientras suena, lo que toques en directo manda |
+| SEQ | Banco siguiente (8 bancos, cada uno con su idea). Si algo suena, el cambio entra al acabar el bucle |
 | OCT− / OCT+ | Octava |
-| SAVE | Guarda los ajustes y la idea grabada |
+| SAVE | Guarda los ajustes y los 8 bancos |
 
 Los modificadores se combinan: `7` + `9` da maj9, m9 o 9 según el grado; `sus4` + `7` da 7sus4.
 

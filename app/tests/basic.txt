@@ -247,3 +247,47 @@ expect peak_db_min -30
 tap FX
 wait 30
 expect page 0
+# --- bancos: SEQ pasa de banco; cada uno, su idea ---
+expect bank 0
+expect loop_len 8
+tap SEQ
+wait 30
+expect bank 1
+expect loop_len 0
+tap REC
+wait 30
+key 9 down
+wait 30
+key 9 up
+wait 2370
+tap REC
+wait 30
+expect loop_len 8
+expect play_bank 1
+expect degree 5
+shot banks.png
+# sonando el banco 2, SEQ hasta el 1: espera al final del bucle
+tap SEQ
+tap SEQ
+tap SEQ
+tap SEQ
+tap SEQ
+tap SEQ
+tap SEQ
+wait 30
+expect bank 0
+expect play_bank 1
+shot bank_queued.png
+wait 2300
+expect play_bank 0
+expect degree 0
+# se guardan todos
+tap SAVE
+wait 30
+reboot
+wait 600
+expect bank 0
+expect loop_len 8
+tap SEQ
+wait 30
+expect loop_len 8

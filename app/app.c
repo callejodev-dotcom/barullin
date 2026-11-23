@@ -14,10 +14,16 @@
 #define SR 44100.0f
 
 /* ------------------------------------------------------------- ajustes --- */
-#define SET_MAGIC 0x42524C36u            /* "BRL6" */
+#define SET_MAGIC 0x42524C37u            /* "BRL7" */
 #define LOOP_MAX 64                      /* cambios de acorde en una idea */
 #define LOOP_STEPS 128                   /* 16 compases de corcheas */
 typedef struct { uint8_t step; int8_t degree; uint8_t mods; uint8_t inv; } loop_ev_t;
+#define NBANK 8                          /* bancos de ideas (SEQ pasa de uno a otro) */
+typedef struct {
+    uint8_t len;                         /* corcheas (0: vacío), compases enteros */
+    uint8_t n;                           /* sus cambios de acorde */
+    loop_ev_t ev[LOOP_MAX];
+} loop_t;
 typedef struct {
     uint32_t magic;
     uint8_t key;                         /* 0 = C .. 11 = B */
@@ -39,9 +45,8 @@ typedef struct {
     uint8_t dly_on, rev_on;
     uint8_t rev_size;                    /* 0..9: tamaño de la sala */
     uint8_t rev_tone;                    /* 0..9: oscura .. brillante */
-    uint8_t loop_len;                    /* la idea grabada: corcheas (0: no hay), compases enteros */
-    uint8_t loop_n;                      /* sus cambios de acorde */
-    loop_ev_t loop_ev[LOOP_MAX];
+    uint8_t cur_bank;                    /* el banco elegido: REC graba en él, PLAY lo toca */
+    loop_t bank[NBANK];
 } settings_t;
 static settings_t set;
 static uint8_t set_dirty;
@@ -416,6 +421,8 @@ static struct {
     uint8_t fx_page;                     /* la última página de efectos (2 delay, 3 reverb): FX vuelve a ella */
     uint8_t page;                        /* de quién son K1..K4: 0 el acorde, 1 el arpegiador, 2 delay, 3 reverb */
     uint8_t rec;                         /* 0 no, 1 armado (espera el primer acorde), 2 grabando */
+    uint8_t play_bank;                   /* el banco que suena */
+    uint8_t next_bank;                   /* el que sonará al acabar el bucle (0xFF: ninguno) */
     uint8_t playing;
     float rec_acc, play_acc;             /* corcheas desde que empezó la grabación / dentro del bucle */
     uint32_t rec_sig, last_ms, shown_pos;                        /* de quién son K1..K4: 0 el acorde, 1 el arpegiador */                  /* con ARP mantenido se giró un knob: al soltar no se conmuta */
@@ -452,8 +459,21 @@ static void settings_defaults(void)
     set.rev_on = 1;
     set.rev_size = 6;
     set.rev_tone = 7;
-    set.loop_len = 0;
-    set.loop_n = 0;
+    set.cur_bank = 0;
+    {
+        int b;
+        for (b = 0; b < NBANK; b++) set.bank[b].len = set.bank[b].n = 0;
+    }
+}
+
+static int banks_ok(void)
+{
+    int b;
+    for (b = 0; b < NBANK; b++) {
+        const loop_t *L = &set.bank[b];
+        if (L->len > LOOP_STEPS || L->n > LOOP_MAX || (L->len && !L->n)) return 0;
+    }
+    return 1;
 }
 
 static void settings_load(void)
@@ -465,7 +485,7 @@ static void settings_load(void)
         || set.arp_len < 1u || set.arp_len > 9u || set.tempo < 40u || set.tempo > 220u
         || set.dly_mix > 10u || set.dly_div > 5u || set.dly_fb > 9u || set.rev_mix > 10u
         || set.dly_on > 1u || set.rev_on > 1u || set.rev_size > 9u || set.rev_tone > 9u
-        || set.loop_len > LOOP_STEPS || set.loop_n > LOOP_MAX || (set.loop_len && !set.loop_n))
+        || set.cur_bank >= NBANK || !banks_ok())
         settings_defaults();
 }
 
@@ -478,6 +498,7 @@ void app_init(void)
     st.sig = 0;
     st.rec = 0;
     st.playing = 0;
+    st.next_bank = 0xFFu;
     st.page = 0;
     st.gate_hold_off = 0;
     bl_chord_build(set.key, set.mode, 0, 0, 0, 60 + 12 * set.octave, &st.cur);
@@ -606,6 +627,9 @@ static void set_changed(const char *a, const char *b)
 /* Se graban los cambios de acorde (grado, modificadores, inversión) en corcheas al tempo; el bucle dura
  * compases enteros. Las teclas en directo mandan sobre lo grabado mientras se mantienen. */
 static float eighth_ms(void) { return 30000.0f / (float)set.tempo; }
+#define REC_LOOP (set.bank[set.cur_bank])
+#define PLAY_LOOP (set.bank[st.play_bank])
+static void seq_play(int on);
 
 static void seq_tick(void)
 {
@@ -613,26 +637,37 @@ static void seq_tick(void)
     float d = (float)(now - st.last_ms) / eighth_ms();
     st.last_ms = now;
     if (st.rec == 2) st.rec_acc += d;
-    if (st.playing && set.loop_len) {
+    if (st.playing && PLAY_LOOP.len) {
         st.play_acc += d;
-        while (st.play_acc >= (float)set.loop_len) st.play_acc -= (float)set.loop_len;
+        while (st.playing && st.play_acc >= (float)PLAY_LOOP.len) {
+            st.play_acc -= (float)PLAY_LOOP.len;
+            if (st.next_bank < NBANK) {      /* el bucle acabó: entra el banco pedido */
+                st.play_bank = st.next_bank;
+                st.next_bank = 0xFFu;
+                st.redraw = 1;
+                if (!PLAY_LOOP.len) { seq_play(0); break; }   /* vacío: silencio */
+            }
+        }
     }
 }
 
 static void seq_current(int *degree, unsigned *mods, int *inv)
 {
-    int i, k = set.loop_n - 1;
+    const loop_t *L = &PLAY_LOOP;
+    int i, k = L->n - 1;
     uint32_t pos = (uint32_t)st.play_acc;
-    for (i = 0; i < set.loop_n; i++)
-        if (set.loop_ev[i].step <= pos) k = i;
-    *degree = set.loop_ev[k].degree;
-    *mods = set.loop_ev[k].mods;
-    *inv = set.loop_ev[k].inv;
+    for (i = 0; i < L->n; i++)
+        if (L->ev[i].step <= pos) k = i;
+    *degree = L->ev[k].degree;
+    *mods = L->ev[k].mods;
+    *inv = L->ev[k].inv;
 }
 
 static void seq_play(int on)
 {
-    st.playing = (uint8_t)(on && set.loop_len);
+    st.play_bank = set.cur_bank;
+    st.next_bank = 0xFFu;
+    st.playing = (uint8_t)(on && REC_LOOP.len);
     st.play_acc = 0.0f;
     if (!st.playing) st.gate_hold_off = 1;   /* al parar, el acorde calla */
     st.redraw = 1;
@@ -642,11 +677,11 @@ static void seq_finish(void)
 {
     int len = ((int)(st.rec_acc + 4.0f) / 8) * 8;   /* al compás más cercano */
     st.rec = 0;
-    if (!set.loop_n) { app_say("REC", "NADA"); return; }
+    if (!REC_LOOP.n) { app_say("REC", "NADA"); return; }
     if (len < 8) len = 8;
-    while (len <= set.loop_ev[set.loop_n - 1].step) len += 8;
+    while (len <= REC_LOOP.ev[REC_LOOP.n - 1].step) len += 8;
     if (len > LOOP_STEPS) len = LOOP_STEPS;
-    set.loop_len = (uint8_t)len;
+    REC_LOOP.len = (uint8_t)len;
     set_dirty = 1;
     {
         char t[12];
@@ -664,17 +699,17 @@ static void seq_record(int degree, unsigned mods, int inv, int live)
     if (st.rec == 1 && live) {               /* el primer acorde que se toca: empieza */
         st.rec = 2;
         st.rec_acc = 0.0f;
-        set.loop_n = 0;
-        set.loop_len = 0;
+        REC_LOOP.n = 0;
+        REC_LOOP.len = 0;
         st.rec_sig = ~0u;
     }
     if (st.rec != 2 || sig == st.rec_sig) return;
     st.rec_sig = sig;
     step = (int)(st.rec_acc + 0.5f);
     if (step >= LOOP_STEPS) { seq_finish(); return; }
-    if (set.loop_n && set.loop_ev[set.loop_n - 1].step == step) set.loop_n--;   /* en la misma corchea: el último */
-    if (set.loop_n < LOOP_MAX) {
-        loop_ev_t *ev = &set.loop_ev[set.loop_n++];
+    if (REC_LOOP.n && REC_LOOP.ev[REC_LOOP.n - 1].step == step) REC_LOOP.n--;   /* en la misma corchea: el último */
+    if (REC_LOOP.n < LOOP_MAX) {
+        loop_ev_t *ev = &REC_LOOP.ev[REC_LOOP.n++];
         ev->step = (uint8_t)step;
         ev->degree = (int8_t)degree;
         ev->mods = (uint8_t)mods;
@@ -774,8 +809,22 @@ static void input(void)
             }
         } else if (k == B_PLAY) {
             if (st.rec == 2) seq_finish();
-            else if (!set.loop_len) app_say("PLAY", "GRABA CON REC");
+            else if (!REC_LOOP.len) app_say("PLAY", "BANCO VACIO");
             else seq_play(!st.playing);
+        } else if (k == B_SEQ) {
+            char t[16] = "BANCO ";
+            char nb[4];
+            if (st.rec == 2) continue;       /* grabando: el banco no cambia */
+            set.cur_bank = (uint8_t)((set.cur_bank + 1u) % NBANK);
+            set_dirty = 1;
+            int_text(set.cur_bank + 1, nb);
+            text_cat(t, nb);
+            if (st.playing) {                /* sonando: entra al acabar el bucle */
+                st.next_bank = set.cur_bank == st.play_bank ? 0xFFu : set.cur_bank;
+                app_say(t, st.next_bank < NBANK ? "AL ACABAR" : "");
+            } else {
+                app_say(t, REC_LOOP.len ? "" : "VACIO");
+            }
         } else if (k == B_FX) {
             if (st.page < 2)                 /* desde fuera: a la última página de efectos */
                 st.page = st.fx_page ? st.fx_page : 2;
@@ -950,6 +999,19 @@ static void draw(void)
         int32_t w = text_w(&FONT_L, c->name);
         char rom[8];
         cv_text((240 - w) / 2, 6, &FONT_L, c->name, col);
+        {                                    /* los bancos: lleno, vacío; el elegido, enmarcado */
+            int b;
+            for (b = 0; b < NBANK; b++) {
+                int32_t x = 8 + b * 11, y = 46;
+                uint16_t fill = set.bank[b].len ? (st.playing && b == st.play_bank ? C_WHITE : C_HI) : C_LINE;
+                if (b == set.cur_bank) {
+                    uint16_t fr = (st.next_bank == b) ? C_AMB : C_WHITE;
+                    cv_rect(x - 2, y - 2, 13, 13, fr);
+                    cv_rect(x - 1, y - 1, 11, 11, C_BLACK);
+                }
+                cv_rect(x, y, 9, 9, fill);
+            }
+        }
         if (st.rec || st.playing) {          /* REC / PLAY y compás.pulso */
             char b[16] = "";
             uint32_t p = (uint32_t)(st.playing ? st.play_acc : st.rec_acc);
@@ -960,7 +1022,7 @@ static void draw(void)
                 int_text((int32_t)(p / 8u + 1u), n); text_cat(b, n);
                 text_cat(b, ".");
                 int_text((int32_t)(p % 8u / 2u + 1u), n); text_cat(b, n);
-                if (st.playing) { text_cat(b, "/"); int_text(set.loop_len / 8, n); text_cat(b, n); }
+                if (st.playing) { text_cat(b, "/"); int_text(PLAY_LOOP.len / 8, n); text_cat(b, n); }
             }
             cv_text(6, 4, &FONT_XS, b, st.rec ? C_WHITE : C_HI);
         }
@@ -1104,8 +1166,10 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "pad_on")) { int j, on = 0; for (j = 0; j < NPAD; j++) on |= pad[j].env > 0.01f; *got = on; }
     else if (!strcmp(what, "bass_on")) *got = bass_env > 0.01f;
     else if (!strcmp(what, "playing")) *got = st.playing;
-    else if (!strcmp(what, "loop_len")) *got = set.loop_len;
-    else if (!strcmp(what, "loop_n")) *got = set.loop_n;
+    else if (!strcmp(what, "loop_len")) *got = REC_LOOP.len;
+    else if (!strcmp(what, "loop_n")) *got = REC_LOOP.n;
+    else if (!strcmp(what, "bank")) *got = set.cur_bank;
+    else if (!strcmp(what, "play_bank")) *got = st.playing ? st.play_bank : -1;
     else if (!strcmp(what, "arp_mode")) *got = set.arp_mode;
     else if (!strcmp(what, "tempo")) *got = set.tempo;
     else if (!strcmp(what, "arp_moving")) *got = arp_steps >= 4u;   /* al menos cuatro pasos tocados */
