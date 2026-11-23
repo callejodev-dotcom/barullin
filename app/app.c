@@ -8,13 +8,19 @@
  *   K1 tonalidad  K2 modo  K3 octava  K4 brillo      SAVE guarda
  *
  * Forma parte del unity build de fm1-base: gfx.c, announce.c y touch están a la vista. */
+#ifdef PLAT_HOST
+#include <string.h>
+#else
+void *memcpy(void *d, const void *s, unsigned n);   /* (felucca-bsp chip/libc.c: sin cabeceras de la libc) */
+void *memset(void *d, int c, unsigned n);
+#endif
 #include "fastmath.h"
 #include "core/chords.h"
 
 #define SR 44100.0f
 
 /* ------------------------------------------------------------- ajustes --- */
-#define SET_MAGIC 0x42524C4Eu            /* "BRLN" */
+#define SET_MAGIC 0x42524C50u            /* "BRLP" */
 #define LOOP_MAX 64                      /* cambios de acorde en una idea */
 #define LOOP_STEPS 128                   /* 16 compases de corcheas */
 typedef struct { uint8_t step; int8_t degree; uint8_t mods; uint8_t inv; } loop_ev_t;
@@ -48,14 +54,17 @@ typedef struct {
 } loop_t;
 typedef struct {
     uint32_t magic;
+    /* lo global (no cambia con el banco) */
+    uint8_t lead;                        /* voice leading */
+    uint8_t quant;                       /* cuadrar los cambios de acorde: 0 al momento, 1 corchea, 2 negra, 3 compás */
+    uint8_t hold;                        /* el acorde sigue al soltar (por defecto, sí) */
+    uint8_t cur_bank;                    /* el banco elegido: REC graba en él, PLAY lo toca */
+    /* --- el sonido de la idea: cada banco tiene el suyo, de key a kit_end (ver kit_store / kit_load) --- */
     uint8_t key;                         /* 0 = C .. 11 = B */
     uint8_t mode;                        /* enum bl_mode */
     int8_t octave;                       /* -2 .. +2 */
     uint8_t bright;                      /* 0..20: el corte del filtro del pad */
-    uint8_t lead;                        /* voice leading */
     uint8_t sound;                       /* el sonido del pad (GLO, K3): enum snd */
-    uint8_t quant;                       /* cuadrar los cambios de acorde: 0 al momento, 1 corchea, 2 negra, 3 compás */
-    uint8_t hold;                        /* el acorde sigue al soltar (por defecto, sí) */
     uint8_t arp_free;                    /* ciclo del arpegio: 0 en el compás (grupos de 4), 1 libre */
     uint8_t meter;                       /* tipo de compás (PRESET): 4/4, 3/4, 6/8, 5/4, 7/8 */
     uint8_t arp_mute_vol;                /* el volumen que tenía el arpegio antes de silenciarlo con SEL */
@@ -68,7 +77,7 @@ typedef struct {
                                           * efecto (delay, delay libre, reverb) */
     uint8_t dly_div;                     /* 0..5: 1/16 1/8 1/8. 1/4 1/4. 1/2 */
     uint8_t dly_fb;                      /* 0..9: repeticiones */
-    uint8_t dly_on, rev_on;
+    uint8_t dly_on, rev_on;              /* 0: silenciado con SEL (suena si alguna capa le manda algo: FX_ON) */
     uint8_t rev_size;                    /* 0..9: tamaño de la sala */
     uint8_t rev_tone;                    /* 0..9: oscura .. brillante */
     uint8_t env_a, env_d, env_s, env_r;  /* la envolvente del pad: ataque, caída (0..9), sostenido (0..10), release (0..9) */
@@ -88,11 +97,22 @@ typedef struct {
     uint8_t drm_hopen;                   /* la apertura del charles: 0 cerrado .. 10 abierto */
     uint8_t drm_mute;                    /* SEL en su página: silencio (los volúmenes se guardan) */
     uint8_t rev_width;                   /* 0..10: ancho estéreo de la reverb */
-    lfo_t lfo[3];                        /* un LFO por sonido: pad, arpegio, bajo */
-    uint8_t cur_bank;                    /* el banco elegido: REC graba en él, PLAY lo toca */
+    lfo_t lfo[3];                        /* los tres LFO */
+    uint8_t kit_end;                     /* (la marca: aquí acaba el sonido de la idea) */
     loop_t bank[NBANK];
 } settings_t;
-static settings_t set;
+/* Lo que se guarda: los ajustes (con el sonido del banco que suena) y el sonido de cada banco. Un banco que
+ * nunca se tocó (kit_used 0) empieza con todo de serie. */
+#define KIT_OFS __builtin_offsetof(settings_t, key)
+#define KIT_SIZE (__builtin_offsetof(settings_t, kit_end) - __builtin_offsetof(settings_t, key))
+typedef struct {
+    settings_t s;
+    uint8_t kit_used[NBANK];
+    uint8_t kits[NBANK][KIT_SIZE];
+} saved_t;
+static saved_t sv;
+#define set (sv.s)
+typedef char saved_fits[sizeof(saved_t) <= PLAT_STORE_MAX ? 1 : -1];   /* cabe en un objeto del almacén */
 static uint8_t set_dirty;
 
 static const char *const MODE_NAME[BL_MODE_COUNT] = {"MAYOR", "DORICO", "FRIGIO", "LIDIO",
@@ -123,9 +143,9 @@ static const meter_t METER[NMETER] = {
 static const char *const ARP_MODE_NAME[4] = {"SUBE", "BAJA", "S-B", "AZAR"};
 
 /* las páginas de los knobs: cada botón recorre las suyas; HOME vuelve a la principal */
-enum { PG_MAIN, PG_ARP, PG_DLY, PG_REV, PG_ENV_PAD, PG_ENV_ARP, PG_ENV_BASS, PG_BP, PG_LFO_PAD, PG_LFO_ARP, PG_LFO_BASS, PG_GLO, PG_DRUM, PG_DLY2, NPG };
+enum { PG_MAIN, PG_ARP, PG_DLY, PG_REV, PG_ENV_PAD, PG_ENV_ARP, PG_ENV_BASS, PG_BP, PG_LFO_PAD, PG_LFO_ARP, PG_LFO_BASS, PG_GLO, PG_DRUM, PG_DLY2, PG_BT, NPG };
 static const char *const PAGE_NAME[NPG] = {"", "ARPEGIADOR", "DELAY", "REVERB", "ENVOLVENTE", "ENVOLVENTE", "ENVOLVENTE",
-                                           "BAJO PULSADO", "LFO 1", "LFO 2", "LFO 3", "GLOBAL", "RITMO", "DELAY LIBRE"};
+                                           "BAJO PULSADO", "LFO 1", "LFO 2", "LFO 3", "GLOBAL", "RITMO", "DELAY LIBRE", "BLUETOOTH"};
 static const char *const ARP_DIV_NAME[3] = {"1/8", "1/8T", "1/16"};
 static const char *const BP_DIV_NAME[4] = {"1/4", "1/8", "1/8T", "1/16"};
 static const char *const BP_PAT_NAME[4] = {"NOTA", "QUINTA", "OCTAVA", "ACORDE"};
@@ -392,6 +412,19 @@ static float comb_buf[NCOMB][1356] PLAT_POOL;
 static float ap_buf[2][NAP][556 + RSPREAD] PLAT_POOL;
 static uint16_t comb_i[NCOMB], ap_i[2][NAP];
 static float comb_lp[NCOMB];
+static int fx_any(int f)                 /* alguna capa le manda algo al efecto f */
+{
+    return (set.fx_send[f][0] | set.fx_send[f][1] | set.fx_send[f][2] | set.fx_send[f][3]) != 0;
+}
+static int fx_unmuted(int f) { return f == FX_DLY ? set.dly_on : f == FX_DLY2 ? set.d2_on : set.rev_on; }
+#define FX_ON(f) (fx_unmuted(f) && fx_any(f))   /* un efecto suena en cuanto alguna capa le manda algo */
+static void fx_clear(int f)              /* sin ecos ni cola viejos al volver a sonar */
+{
+    uint32_t z;
+    if (f == FX_DLY) for (z = 0; z < DLY_MAX; z++) dly_buf[0][z] = dly_buf[1][z] = 0;
+    else if (f == FX_DLY2) for (z = 0; z < DLY_MAX; z++) dl2_buf[z] = 0;
+    else { memset(comb_buf, 0, sizeof comb_buf); memset(ap_buf, 0, sizeof ap_buf); }
+}
 static float rv_fb = 0.84f, rv_tone = 0.8f;   /* del bloque: tamaño y tono */
 
 static float dly_target(void)
@@ -755,18 +788,19 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     float dsend[4], d2send[4], rsend[4];
     {
         int k;
-        float dm = set.dly_on ? fm_maxf(0.0f, 0.07f * (1.0f + M[D_DLY_MIX])) : 0.0f;
-        float rm = set.rev_on ? fm_maxf(0.0f, 0.12f * 0.03f * (1.0f + M[D_REV_MIX])) : 0.0f;
-        float d2m = set.d2_on ? 0.07f : 0.0f;
+        float dm = FX_ON(FX_DLY) ? fm_maxf(0.0f, 0.07f * (1.0f + M[D_DLY_MIX])) : 0.0f;
+        float rm = FX_ON(FX_REV) ? fm_maxf(0.0f, 0.12f * 0.03f * (1.0f + M[D_REV_MIX])) : 0.0f;
+        float d2m = FX_ON(FX_DLY2) ? 0.07f : 0.0f;
         for (k = 0; k < 4; k++) {
             dsend[k] = (float)set.fx_send[FX_DLY][k] * dm;
             d2send[k] = (float)set.fx_send[FX_DLY2][k] * d2m;
             rsend[k] = (float)set.fx_send[FX_REV][k] * rm;
         }
     }
-    float dfb = set.dly_on ? (float)set.dly_fb * 0.09f : 0.0f;
+    int dly_run = FX_ON(FX_DLY), d2_run = FX_ON(FX_DLY2), rev_run = FX_ON(FX_REV);
+    float dfb = dly_run ? (float)set.dly_fb * 0.09f : 0.0f;
     float dtarget = dly_target() * (1.0f + 0.04f * M[D_DLY_TIME]);   /* el tiempo, movido: efecto de cinta */
-    float d2fb = set.d2_on ? (float)set.d2_fb * 0.09f : 0.0f;
+    float d2fb = d2_run ? (float)set.d2_fb * 0.09f : 0.0f;
     float d2target = fm_minf(SR * (float)set.d2_ms / 1000.0f * (1.0f + 0.04f * M[D_DL2_TIME]), (float)(DLY_MAX - 2));
     float d2tone = 0.15f + (float)set.d2_tone * 0.094f;
     int dstill = D[D_DLY_TIME] <= 0.0f && fm_fabsf(dtarget - dly_cur) < 0.5f;
@@ -1057,14 +1091,14 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         bm = bf_s2 * bassG;
         {   /* lo que entra a cada efecto, en mono */
             float pm = (l + r) * 0.5f, am = (al + ar) * 0.5f, sm = (sl + sr) * 0.5f;
-            din = set.dly_on ? dsend[0] * pm + dsend[1] * bm + dsend[2] * am + dsend[3] * sm : 0.0f;
-            d2in = set.d2_on ? d2send[0] * pm + d2send[1] * bm + d2send[2] * am + d2send[3] * sm : 0.0f;
-            rin = set.rev_on ? rsend[0] * pm + rsend[1] * bm + rsend[2] * am + rsend[3] * sm : 0.0f;
+            din = dly_run ? dsend[0] * pm + dsend[1] * bm + dsend[2] * am + dsend[3] * sm : 0.0f;
+            d2in = d2_run ? d2send[0] * pm + d2send[1] * bm + d2send[2] * am + d2send[3] * sm : 0.0f;
+            rin = rev_run ? rsend[0] * pm + rsend[1] * bm + rsend[2] * am + rsend[3] * sm : 0.0f;
         }
         l += al + sl + bm;
         r += ar + sr + bm;
         /* efectos: delay de rebote y reverb, sobre el pad, el rasgueo y el arpegio */
-        if (set.dly_on) {
+        if (dly_run) {
             float yl, yr;
             if (dstill) {                    /* tiempo quieto: lectura directa */
                 int32_t i0 = (int32_t)dly_w - dint;
@@ -1084,7 +1118,7 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             l += yl;
             r += yr;
         }
-        if (set.d2_on) {                     /* el delay libre */
+        if (d2_run) {                        /* el delay libre */
             float y;
             if (d2still) {                   /* tiempo quieto: lectura directa */
                 int32_t i0 = (int32_t)dl2_w - d2int;
@@ -1107,7 +1141,7 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             l += y;
             r += y;
         }
-        if (set.rev_on) {
+        if (rev_run) {
             float rl, rr;
             reverb_st(rin, &rl, &rr);
             l += (rl * (1.0f + rwid) + rr * (1.0f - rwid)) * 0.5f;   /* ancho: de mono a todo estéreo */
@@ -1161,7 +1195,10 @@ static struct {
     uint8_t q_pend;                      /* un acorde nuevo espera a su línea de la rejilla (CUADRAR) */
     uint8_t repress;
     uint8_t fx_layer;
-    uint8_t hinted;                      /* el aviso de "sube el volumen", ya dado */                    /* FX: la capa cuyo envío lleva K4 (ALGORITHM la elige) */                     /* se pulsó una tecla de acorde: vuelve a sonar aunque sea el mismo */
+    uint8_t hinted;
+    uint8_t kit_bank;
+    int8_t bt_pick;                      /* Bluetooth: lo elegido con ALGORITHM (0 BUSCAR) */
+    uint8_t bt_tried, bt_last;           /* la reconexión de al arrancar, ya intentada; el último estado dicho */                    /* el banco cuyo sonido suena ahora (el que se edita) */                      /* el aviso de "sube el volumen", ya dado */                    /* FX: la capa cuyo envío lleva K4 (ALGORITHM la elige) */                     /* se pulsó una tecla de acorde: vuelve a sonar aunque sea el mismo */
     uint32_t q_sig, q_resets;
     int8_t q_deg;                        /* el acorde que espera (sigue esperando aunque se suelte la tecla) */
     uint8_t q_mods, q_inv;
@@ -1215,15 +1252,11 @@ static void settings_defaults(void)
     set.arp_oct = 1;
     set.arp_len = 5;
     set.tempo = 100;
-    {   /* de serie, como sonaba: pad, arpegio y rasgueo a los efectos; el bajo, seco */
-        static const uint8_t DEF[3][4] = {{3, 0, 3, 3}, {3, 0, 3, 3}, {4, 0, 4, 4}};
-        int a, b;
-        for (a = 0; a < 3; a++) for (b = 0; b < 4; b++) set.fx_send[a][b] = DEF[a][b];
-    }
+    memset(set.fx_send, 0, sizeof set.fx_send);   /* los efectos: nada les manda nada; suenan al subir una mezcla */
     set.dly_div = 2;
     set.dly_fb = 4;
-    set.dly_on = 0;                          /* los efectos, apagados de serie */
-    set.rev_on = 0;
+    set.dly_on = 1;                          /* (no silenciados: suenan en cuanto se les manda algo) */
+    set.rev_on = 1;
     set.rev_size = 6;
     set.rev_tone = 7;
     set.env_a = 5;                           /* ~90 ms: lo que sonaba antes */
@@ -1244,7 +1277,7 @@ static void settings_defaults(void)
     set.vol_arp = 0;                         /* el arpegio, callado hasta que se le sube */
     set.vol_strum = VOL_UNITY;
     set.dly_tone = 7;
-    set.d2_on = 0;
+    set.d2_on = 1;
     set.d2_ms = 300;
     set.d2_fb = 3;
     set.d2_tone = 6;
@@ -1294,7 +1327,7 @@ static int banks_ok(void)
 
 static void settings_load(void)
 {
-    if (plat_store_load(OBJ_SETTINGS, &set, sizeof set) != (int)sizeof set || set.magic != SET_MAGIC
+    if (plat_store_load(OBJ_SETTINGS, &sv, sizeof sv) != (int)sizeof sv || set.magic != SET_MAGIC
         || set.key > 11u || set.mode >= BL_MODE_COUNT || set.octave < -2 || set.octave > 2
         || set.bright > 20u || set.lead > 1u || set.sound >= NSND || !fx_send_ok() || set.quant > 3u || set.hold > 1u
         || set.arp_mute_vol > VOL_MAX || set.arp_free > 1u || set.meter >= NMETER || set.arp_mode > 3u || set.arp_div > 2u || set.arp_oct < 1u || set.arp_oct > 3u
@@ -1308,8 +1341,50 @@ static void settings_load(void)
         || set.drm_hat > VOL_MAX || set.drm_hopen > 10u || set.drm_mute > 1u || set.rev_width > 10u
         || !lfos_ok()
         || set.benv_a > 9u || set.benv_d > 9u || set.benv_s > 10u || set.benv_r > 9u
-        || set.cur_bank >= NBANK || !banks_ok())
+        || set.cur_bank >= NBANK || !banks_ok()) {
         settings_defaults();
+        memset(sv.kit_used, 0, sizeof sv.kit_used);
+    }
+}
+static int settings_valid(void)          /* el sonido que acaba de entrar, ¿tiene sentido? (los de los bancos) */
+{
+    return !(set.key > 11u || set.mode >= BL_MODE_COUNT || set.octave < -2 || set.octave > 2
+        || set.bright > 20u || set.sound >= NSND || !fx_send_ok()
+        || set.arp_mute_vol > VOL_MAX || set.arp_free > 1u || set.meter >= NMETER || set.arp_mode > 3u || set.arp_div > 2u || set.arp_oct < 1u || set.arp_oct > 3u
+        || set.arp_len < 1u || set.arp_len > 9u || set.tempo < 40u || set.tempo > 220u
+        || set.dly_div > 5u || set.dly_fb > 9u
+        || set.dly_on > 1u || set.rev_on > 1u || set.rev_size > 9u || set.rev_tone > 9u
+        || set.env_a > 9u || set.env_d > 9u || set.env_s > 10u || set.env_r > 9u
+        || set.aenv_a > 9u || set.aenv_d > 9u || set.aenv_s > 10u || set.aenv_r > 9u || set.bp_on > 1u || set.bp_div > 3u || set.bp_pat > 3u || set.bp_len < 1u || set.bp_len > 9u || set.bp_oct < -1 || set.bp_oct > 1
+        || set.vol_pad > VOL_MAX || set.vol_bass > VOL_MAX || set.vol_arp > VOL_MAX || set.vol_strum > VOL_MAX || set.dly_tone > 9u || set.d2_on > 1u || set.d2_ms < 10u || set.d2_ms > 750u
+        || set.d2_fb > 9u || set.d2_tone > 9u || set.drm_kick > VOL_MAX || set.drm_snare > VOL_MAX
+        || set.drm_hat > VOL_MAX || set.drm_hopen > 10u || set.drm_mute > 1u || set.rev_width > 10u
+        || !lfos_ok()
+        || set.benv_a > 9u || set.benv_d > 9u || set.benv_s > 10u || set.benv_r > 9u);
+}
+
+/* el sonido de la idea: guardarlo en su banco, o traer el de otro (o el de serie, si ese nunca se tocó) */
+static void kit_store(int b)
+{
+    memcpy(sv.kits[b], (uint8_t *)&set + KIT_OFS, KIT_SIZE);
+    sv.kit_used[b] = 1;
+}
+static void kit_defaults(void)
+{
+    static settings_t keep;              /* lo que no es del sonido (lo global y las ideas) se queda */
+    keep = set;
+    settings_defaults();
+    memcpy((uint8_t *)&keep + KIT_OFS, (uint8_t *)&set + KIT_OFS, KIT_SIZE);
+    set = keep;
+}
+static void kit_load(int b)
+{
+    if (sv.kit_used[b]) {
+        memcpy((uint8_t *)&set + KIT_OFS, sv.kits[b], KIT_SIZE);
+        if (!settings_valid()) kit_defaults();
+    } else {
+        kit_defaults();
+    }
 }
 
 void app_init(void)
@@ -1323,6 +1398,7 @@ void app_init(void)
     st.rec = 0;
     st.playing = 0;
     st.next_bank = 0xFFu;
+    st.kit_bank = set.cur_bank;          /* lo que suena al arrancar es el sonido del banco elegido */
     st.page = 0;
     st.gate_hold_off = 0;
     bl_chord_build(set.key, set.mode, 0, 0, 0, 60 + 12 * set.octave, &st.cur);
@@ -1485,24 +1561,31 @@ static void set_changed(const char *a, const char *b)
 /* K4 en las páginas de efectos: lo que manda al efecto la capa elegida con ALGORITHM */
 static void fx_send_knob(int32_t e, char *t)
 {
-    uint8_t *v = &set.fx_send[page_fx(st.page)][st.fx_layer & 3u];
+    int f = page_fx(st.page), was = FX_ON(f);
+    uint8_t *v = &set.fx_send[f][st.fx_layer & 3u];
     char h[20] = "MEZCLA ";
     *v = (uint8_t)clamp((int32_t)*v + e, 0, 10);
+    if (!was && FX_ON(f)) fx_clear(f);       /* vuelve a sonar: sin ecos viejos */
     text_cat(h, LAYER_NAME[st.fx_layer & 3u]);
     int_text(*v * 10, t);
     text_cat(t, "%");
     set_changed(h, t);
 }
 
+static const char *bt_word(int s);      /* (Bluetooth: más abajo) */
+static int bt_streaming(void);
+static void bt_sel(void);
 /* ------------------------------------------------------------ páginas --- */
 static const char *page_state(int pg)    /* lo que se dice al entrar: si está encendido */
 {
     switch (pg) {
     case PG_ARP: return ARP_ON ? "SI" : "NO";
     case PG_BP: return set.bp_on ? "SI" : "NO";
-    case PG_DLY: return set.dly_on ? "SI" : "NO";
-    case PG_REV: return set.rev_on ? "SI" : "NO";
-    case PG_DLY2: return set.d2_on ? "SI" : "NO";
+    case PG_BT: return bt_word(plat_bta_state());
+    case PG_DLY: case PG_REV: case PG_DLY2: {
+        int f = page_fx(pg);
+        return !fx_unmuted(f) ? "SILENCIO" : fx_any(f) ? "SI" : "NO  SUBE UNA MEZCLA";
+    }
     case PG_DRUM: return set.drm_mute ? "SILENCIO" : DRUM_ON ? "SI" : "NO  SEL: BASICO";
     case PG_LFO_PAD: case PG_LFO_ARP: case PG_LFO_BASS:
         return set.lfo[pg - PG_LFO_PAD].on ? LFO_DEST_NAME[set.lfo[pg - PG_LFO_PAD].dest % NDEST] : "NO";
@@ -1516,9 +1599,8 @@ static int page_active(int pg)
     switch (pg) {
     case PG_ARP: return ARP_ON;
     case PG_BP: return set.bp_on != 0;
-    case PG_DLY: return set.dly_on != 0;
-    case PG_REV: return set.rev_on != 0;
-    case PG_DLY2: return set.d2_on != 0;
+    case PG_DLY: case PG_REV: case PG_DLY2: return FX_ON(page_fx(pg));
+    case PG_BT: return bt_streaming();
     case PG_LFO_PAD: case PG_LFO_ARP: case PG_LFO_BASS: return set.lfo[pg - PG_LFO_PAD].on != 0;
     case PG_DRUM: return DRUM_ON;
     default: return 0;
@@ -1538,18 +1620,27 @@ static void sel_toggle(void)
         set.bp_on = !set.bp_on;
         if (set.bp_on && !set.vol_bass) { set.vol_bass = 12; app_say("BAJO PULSADO", "SI  (BAJO AL 60%)"); return; }
         break;
-    case PG_DLY:
-        if (!set.dly_on) {                   /* sin ecos viejos al volver */
-            uint32_t z;
-            for (z = 0; z < DLY_MAX; z++) dly_buf[0][z] = dly_buf[1][z] = 0;
+    case PG_BT: bt_sel(); return;
+    case PG_DLY: case PG_REV: case PG_DLY2: {   /* silencio rápido; si nadie le manda nada, la capa elegida al 30 % */
+        int f = page_fx(pg);
+        uint8_t *on = f == FX_DLY ? &set.dly_on : f == FX_DLY2 ? &set.d2_on : &set.rev_on;
+        if (!fx_any(f)) {
+            fx_clear(f);
+            set.fx_send[f][st.fx_layer & 3u] = 3;
+            *on = 1;
+            set_dirty = 1;
+            {
+                char h[24] = "SI  (";
+                text_cat(h, LAYER_NAME[st.fx_layer & 3u]);
+                text_cat(h, " 30%)");
+                app_say(PAGE_NAME[pg], h);
+            }
+            return;
         }
-        set.dly_on = !set.dly_on;
+        if (!*on) fx_clear(f);
+        *on = (uint8_t)!*on;
         break;
-    case PG_REV: set.rev_on = !set.rev_on; break;
-    case PG_DLY2:
-        if (!set.d2_on) { uint32_t z; for (z = 0; z < DLY_MAX; z++) dl2_buf[z] = 0; }   /* sin ecos viejos */
-        set.d2_on = !set.d2_on;
-        break;
+    }
     case PG_LFO_PAD: case PG_LFO_ARP: case PG_LFO_BASS: set.lfo[pg - PG_LFO_PAD].on = !set.lfo[pg - PG_LFO_PAD].on; break;
     case PG_DRUM:
         if (!DRUM_ON && !set.drm_mute) {     /* todo a 0: SEL pone un ritmo básico */
@@ -1590,6 +1681,72 @@ static float eighth_ms(void) { return 30000.0f / (float)set.tempo; }
 #define REC_LOOP (set.bank[set.cur_bank])
 #define PLAY_LOOP (set.bank[st.play_bank])
 static void seq_play(int on);
+static void cut_update(void);
+
+/* ------------------------------------------------- Bluetooth: cascos y altavoces --- */
+/* GLO, segunda página. ALGORITHM elige: BUSCAR, o un aparato (los encontrados, o si no los recordados); SEL hace lo
+ * elegido (buscar, conectar) o cuelga si ya suena; K4, la salida (el aparato o el FM-1). Llega 150-300 ms tarde:
+ * para escuchar lo hecho, no para tocar a tiempo. Al arrancar se conecta solo al último. */
+static const char *bt_word(int s)
+{
+    switch (s) {
+    case PLAT_BTA_SCANNING: return "BUSCANDO";
+    case PLAT_BTA_FOUND: return "ELIGE UNO";
+    case PLAT_BTA_NONE: return "NO HAY NADA";
+    case PLAT_BTA_PAGING: return "LLAMANDO";
+    case PLAT_BTA_LINKED: case PLAT_BTA_SETUP: return "CONECTANDO";
+    case PLAT_BTA_STREAMING: return "SONANDO";
+    case PLAT_BTA_REFUSED: return "NO QUISO";
+    case PLAT_BTA_NO_LAST: return "SIN ANTERIOR";
+    case PLAT_BTA_FAILED: return "FALLO";
+    case PLAT_BTA_READY: return "LISTO";
+    default: return "APAGADO";
+    }
+}
+static int bt_streaming(void) { return FM1B_BT_AUDIO && plat_bta_state() == PLAT_BTA_STREAMING; }
+static int bt_found_n(void) { char nm[17]; int n = 0; while (n < 16 && plat_bta_found(n, nm)) n++; return n; }
+static int bt_known_n(void) { char nm[17]; int n = 0; while (n < 4 && plat_bta_known(n, nm)) n++; return n; }
+/* el elemento i de la lista de ALGORITHM: 0 BUSCAR, luego los encontrados (o, si no hay, los recordados) */
+static int bt_items(void) { int f = bt_found_n(); return 1 + (f ? f : bt_known_n()); }
+static void bt_item_name(int i, char *nm)
+{
+    nm[0] = 0;
+    if (i <= 0) { text_cat(nm, "BUSCAR"); return; }
+    if (bt_found_n()) { if (!plat_bta_found(i - 1, nm)) nm[0] = 0; }
+    else if (!plat_bta_known(i - 1, nm)) nm[0] = 0;
+    if (!nm[0]) text_cat(nm, "?");
+}
+static void bt_sel(void)
+{
+    int s = plat_bta_state(), i = st.bt_pick;
+    char nm[17];
+    if (s == PLAT_BTA_STREAMING || s == PLAT_BTA_LINKED || s == PLAT_BTA_SETUP || s == PLAT_BTA_PAGING) {
+        plat_bta_hangup();
+        app_say("BLUETOOTH", "COLGADO");
+        return;
+    }
+    if (i <= 0 || i >= bt_items()) {
+        st.bt_pick = 0;
+        plat_bta_scan(1);
+        app_say("BLUETOOTH", "BUSCANDO");
+        return;
+    }
+    bt_item_name(i, nm);
+    if (bt_found_n()) plat_bta_pick(i - 1);
+    else (void)plat_bta_reconnect(i - 1);
+    app_say("CONECTANDO", nm);
+}
+
+/* el sonido pasa al del banco b (el que suena se guarda en el suyo) */
+static void kit_switch(int b)
+{
+    if (b == st.kit_bank) return;
+    kit_store(st.kit_bank);
+    kit_load(b);
+    st.kit_bank = (uint8_t)b;
+    cut_update();
+    st.redraw = 1;
+}
 
 static void seq_tick(void)
 {
@@ -1613,6 +1770,7 @@ static void seq_tick(void)
             if (st.next_bank < NBANK) {      /* el bucle acabó: entra el banco pedido */
                 st.play_bank = st.next_bank;
                 st.next_bank = 0xFFu;
+                kit_switch(st.play_bank);    /* y su sonido */
                 st.redraw = 1;
                 if (!PLAY_LOOP.len) { seq_play(0); break; }   /* vacío: silencio */
             }
@@ -1639,6 +1797,7 @@ static void seq_play(int on)
 {
     st.play_bank = set.cur_bank;
     st.next_bank = 0xFFu;
+    kit_switch(set.cur_bank);            /* suena (o se para en) el banco elegido, con su sonido */
     st.playing = (uint8_t)(on && REC_LOOP.len);
     st.play_acc = 0.0f;
     if (st.playing) tp_reset_req = tp_reset_req + 1u;   /* la idea y el reloj empiezan juntos */
@@ -1839,7 +1998,8 @@ static void input(void)
                 st.next_bank = set.cur_bank == st.play_bank ? 0xFFu : set.cur_bank;
                 app_say(t, st.next_bank < NBANK ? "AL ACABAR" : "");
             } else {
-                app_say(t, REC_LOOP.len ? "" : "VACIO");
+                kit_switch(set.cur_bank);    /* parado: su sonido, ya */
+                app_say(t, REC_LOOP.len ? "" : sv.kit_used[set.cur_bank] ? "VACIO" : "VACIO  TODO DE SERIE");
             }
         } else if (k == B_SEL) {             /* enciende o apaga lo de esta página */
             sel_toggle();
@@ -1859,13 +2019,14 @@ static void input(void)
             static const uint8_t P[1] = {PG_DRUM};
             page_go(P, 1, &st.mem_drum);
         } else if (k == B_GLO) {             /* tonalidad, modo, octava, brillo */
-            static const uint8_t P[1] = {PG_GLO};
-            page_go(P, 1, &st.mem_glo);
+            static const uint8_t P[2] = {PG_GLO, PG_BT};   /* global, y el sonido por Bluetooth */
+            page_go(P, 2, &st.mem_glo);
         } else if (k == B_HOME) {
             st.page = PG_MAIN;               /* los knobs vuelven al acorde (lo que suena sigue sonando) */
             app_say("HOME", "");
         } else if (k == B_SAVE) {
-            if (plat_store_save(OBJ_SETTINGS, &set, sizeof set) == 0) { set_dirty = 0; app_say("GUARDADO", ""); }
+            kit_store(set.cur_bank);         /* el sonido que suena, en su banco */
+            if (plat_store_save(OBJ_SETTINGS, &sv, sizeof sv) == 0) { set_dirty = 0; app_say("GUARDADO", ""); }
             else app_say("GUARDAR", "FALLO");
         }
     }
@@ -2026,6 +2187,16 @@ static void input(void)
             *vol = (uint8_t)clamp((int32_t)*vol + e, 0, VOL_MAX);
             int_text(*vol * 100 / VOL_MAX, t); text_cat(t, "%");
             set_changed(NAME[k - EN_K1], t);
+        } else if (st.page == PG_BT && k == EN_ALGO) {   /* BLUETOOTH: qué (BUSCAR o un aparato) */
+            char nm[17];
+            st.bt_pick = (int8_t)clamp(st.bt_pick + e, 0, bt_items() - 1);
+            bt_item_name(st.bt_pick, nm);
+            app_say("BLUETOOTH", nm);
+        } else if (st.page == PG_BT && k == EN_K4) {   /* la salida: el aparato o el FM-1 */
+            if (bt_streaming()) {
+                plat_bta_output(e > 0 ? 0 : 1);
+                app_say("SALIDA", plat_bta_out_device() ? "APARATO" : "FM-1");
+            } else app_say("SALIDA", "NADA CONECTADO");
         } else if (st.page == PG_GLO && k == EN_ALGO) {   /* GLOBAL: encadenar acordes, en ALGORITHM */
             set.lead = e > 0;
             set_changed("ENCADENAR", set.lead ? "SI" : "NO");
@@ -2081,14 +2252,14 @@ static void input(void)
     plat_glow(1);
     {
         /* cada botón, encendido mientras algo de su sección suena, o mientras se está en una de sus páginas */
-        int arp_on = ARP_ON || set.bp_on, fx_on = set.dly_on || set.rev_on || set.d2_on;
+        int arp_on = ARP_ON || set.bp_on, fx_on = FX_ON(FX_DLY) || FX_ON(FX_REV) || FX_ON(FX_DLY2);
         int lfo_on = set.lfo[0].on || set.lfo[1].on || set.lfo[2].on;
         uint32_t lit = btn | (set_dirty ? 1u << B_SAVE : 0u)
                        | (arp_on || st.page == PG_ARP || st.page == PG_BP ? 1u << B_ARP : 0u)
                        | (fx_on || st.page == PG_DLY || st.page == PG_DLY2 || st.page == PG_REV ? 1u << B_FX : 0u)
                        | (st.page >= PG_ENV_PAD && st.page <= PG_ENV_BASS ? 1u << B_ENV : 0u)
                        | (lfo_on || (st.page >= PG_LFO_PAD && st.page <= PG_LFO_BASS) ? 1u << B_LFO : 0u)
-                       | (st.page == PG_MAIN ? 1u << B_HOME : 0u) | (st.page == PG_GLO ? 1u << B_GLO : 0u)
+                       | (st.page == PG_MAIN ? 1u << B_HOME : 0u) | (st.page == PG_GLO || st.page == PG_BT || bt_streaming() ? 1u << B_GLO : 0u)
                        | (DRUM_ON || st.page == PG_DRUM ? 1u << B_EDIT : 0u)
                        | (page_active(st.page) ? 1u << B_SEL : 0u);   /* SEL: lo de esta página suena */
         st.leds = lit;
@@ -2128,7 +2299,7 @@ static void section_color(int pg, uint16_t *hi, uint16_t *lo)
         *hi = RGB565(255, 130, 200); *lo = RGB565(220, 80, 160); break;
     case PG_DRUM:                                              /* EDIT (ritmo): rojo */
         *hi = RGB565(255, 120, 100); *lo = RGB565(220, 70, 55); break;
-    case PG_GLO:                                               /* GLO: blanco */
+    case PG_GLO: case PG_BT:                                   /* GLO: blanco */
         *hi = RGB565(235, 235, 240); *lo = RGB565(170, 170, 178); break;
     default:                                                   /* HOME: ámbar */
         *hi = C_HI; *lo = C_AMB; break;
@@ -2289,6 +2460,16 @@ static void draw(void)
             int_text(set.drm_snare * 100 / VOL_MAX, v[1]); text_cat(v[1], "%");
             int_text(set.drm_hat * 100 / VOL_MAX, v[2]); text_cat(v[2], "%");
             int_text(set.drm_hopen * 10, v[3]); text_cat(v[3], "%");
+        } else if (pg == PG_BT) {
+            int32_t lat = plat_bta_latency_us();
+            char nm[17];
+            text_cat(head, "  ");
+            text_cat(head, bt_word(plat_bta_state()));
+            lbl[0] = "ELEGIDO"; lbl[1] = ""; lbl[2] = "RETRASO"; lbl[3] = "SALIDA";
+            bt_item_name(st.bt_pick, nm);
+            text_cat(v[0], nm);
+            if (lat >= 0) { int_text(lat / 1000 + 150, v[2]); text_cat(v[2], "+ms"); } else text_cat(v[2], "-");
+            text_cat(v[3], bt_streaming() ? (plat_bta_out_device() ? "APARATO" : "FM-1") : "FM-1");
         } else if (pg == PG_GLO) {
             text_cat(head, set.lead ? "  ENCADENAR SI" : "  ENCADENAR NO");
             lbl[0] = "TONO"; lbl[1] = "MODO"; lbl[2] = "SONIDO"; lbl[3] = "BRILLO";
@@ -2395,6 +2576,7 @@ static void draw(void)
 
 void app_ui_init(void)
 {
+    plat_bta_on(1);                      /* Bluetooth: listo para buscar y conectar cascos o altavoces */
     touch_on(1);
     lcd_fill(0, 0, 240, 240, C_BLACK);
     st.redraw = 1;
@@ -2404,6 +2586,23 @@ void app_frame(void)
 {
     uint32_t now = plat_ms();
     input();
+    {   /* Bluetooth: al arrancar, el último aparato; y se dice cuando cambia algo */
+        int s = plat_bta_state();
+        char nm[17];
+        if (!st.bt_tried && now > 3000u && s != PLAT_BTA_OFF) {
+            st.bt_tried = 1;
+            if (plat_bta_known(0, nm)) (void)plat_bta_reconnect(0);
+        }
+        if (s != st.bt_last) {
+            if (s == PLAT_BTA_STREAMING || s == PLAT_BTA_REFUSED || s == PLAT_BTA_FAILED
+                || (s == PLAT_BTA_FOUND && st.page == PG_BT) || (s == PLAT_BTA_NONE && st.page == PG_BT))
+                app_say("BLUETOOTH", bt_word(s));
+            if (s == PLAT_BTA_FOUND && st.page == PG_BT) st.bt_pick = 1;   /* el primero encontrado, listo para SEL */
+            st.bt_last = (uint8_t)s;
+            st.redraw = 1;
+        }
+        if (plat_bta_lost() != PLAT_BTA_LOST_NONE) app_say("BLUETOOTH", "SE CORTO");
+    }
     if (ann_on() && ann_where()) {
         char t[48] = "";
         text_cat(t, "BARULLIN. ");
@@ -2440,9 +2639,11 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "drum_hits")) *got = drum_hits >= 4u;
     else if (!strcmp(what, "d2_ms")) *got = set.d2_ms;
     else if (!strcmp(what, "quant")) *got = set.quant;
+    else if (!strcmp(what, "bta")) *got = plat_bta_state();
+    else if (!strcmp(what, "bt_pick")) *got = st.bt_pick;
     else if (!strcmp(what, "sound")) *got = set.sound;
     else if (!strcmp(what, "q_pend")) *got = st.q_pend;
-    else if (!strcmp(what, "d2_on")) *got = set.d2_on;
+    else if (!strcmp(what, "d2_on")) *got = FX_ON(FX_DLY2);
     else if (!strcmp(what, "page")) *got = st.page;
     else if (!strcmp(what, "rec")) *got = st.rec;
     else if (!strcmp(what, "rev")) *got = set.fx_send[FX_REV][0];
@@ -2450,8 +2651,8 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "dly_bass")) *got = set.fx_send[FX_DLY][1];
     else if (!strcmp(what, "fx_layer")) *got = st.fx_layer;
     else if (!strcmp(what, "fx_bass")) *got = page_fx(st.page) >= 0 ? set.fx_send[page_fx(st.page)][1] : -1;
-    else if (!strcmp(what, "dly_on")) *got = set.dly_on;
-    else if (!strcmp(what, "rev_on")) *got = set.rev_on;
+    else if (!strcmp(what, "dly_on")) *got = FX_ON(FX_DLY);
+    else if (!strcmp(what, "rev_on")) *got = FX_ON(FX_REV);
     else if (!strcmp(what, "rev_size")) *got = set.rev_size;
     else if (!strcmp(what, "env_s")) *got = set.env_s;
     else if (!strcmp(what, "bp_on")) *got = set.bp_on;
@@ -2460,6 +2661,8 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "lfo_arp")) *got = set.lfo[1].on ? set.lfo[1].dest : -1;
     else if (!strcmp(what, "led_arp")) *got = (int)(st.leds >> B_ARP & 1u);
     else if (!strcmp(what, "led_fx")) *got = (int)(st.leds >> B_FX & 1u);
+    else if (!strcmp(what, "led_glo")) *got = (int)(st.leds >> B_GLO & 1u);
+    else if (!strcmp(what, "bt_out")) *got = plat_bta_out_device();
     else if (!strcmp(what, "led_lfo")) *got = (int)(st.leds >> B_LFO & 1u);
     else if (!strcmp(what, "lfo_bass")) *got = set.lfo[2].on ? set.lfo[2].dest : -1;
     else if (!strcmp(what, "vol_pad")) *got = set.vol_pad;

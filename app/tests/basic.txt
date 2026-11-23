@@ -228,11 +228,11 @@ expect page 2
 expect key 2
 wait 30
 expect dly_on 0
-tap SEL
-turn K4 -1
+# nada le manda nada: subir la mezcla del pad (K4) ya lo enciende
+turn K4 3
 wait 30
 expect dly_on 1
-expect dly 2
+expect dly 3
 shot fx_delay.png
 tap FX
 wait 30
@@ -244,8 +244,14 @@ turn K1 2
 turn K4 3
 wait 30
 expect rev_size 8
-expect rev 7
+expect rev 3
+expect rev_on 1
 shot fx_reverb.png
+# SEL: silencio rápido (la mezcla se queda)
+tap SEL
+wait 30
+expect rev_on 0
+expect rev 3
 # HOME y luego FX: el delay está encendido y la reverb no, así que lleva al delay
 tap HOME
 wait 30
@@ -310,9 +316,22 @@ reboot
 wait 600
 expect bank 0
 expect loop_len 8
+expect vol_pad 16
 tap SEQ
 wait 30
 expect loop_len 8
+# cada banco, su sonido: el 2 nunca se tocó, así que va de serie (el pad a 0); el 1 vuelve con el suyo
+expect vol_pad 0
+tap SEQ
+tap SEQ
+tap SEQ
+tap SEQ
+tap SEQ
+tap SEQ
+tap SEQ
+wait 30
+expect bank 0
+expect vol_pad 16
 # --- ENV: pad, arpegio, bajo, y vuelta al pad (se sale con HOME); sostenido a 0, el acorde se apaga solo ---
 tap ENV
 wait 30
@@ -576,12 +595,13 @@ tap HOME
 wait 30
 # --- compás (PRESET): 4/4 de serie; en 3/4, una idea se cierra en compases de 6 corcheas ---
 expect meter 0
+tap SEQ
+wait 30
+# (el compás es del sonido de la idea: se elige en el banco nuevo)
 turn PRESET 1
 wait 30
 expect meter 1
 shot compas.png
-tap SEQ
-wait 30
 tap REC
 wait 30
 key 0 down
@@ -594,8 +614,16 @@ expect loop_len 6
 expect playing 1
 tap PLAY
 wait 30
-turn PRESET -1
+# de vuelta al banco 1: su compás (4/4) y su sonido
+tap SEQ
+tap SEQ
+tap SEQ
+tap SEQ
+tap SEQ
+tap SEQ
+tap SEQ
 wait 30
+expect bank 0
 expect meter 0
 # --- delay libre: su propia página (FX, la segunda), en ms; SEL lo enciende ---
 tap FX
@@ -734,5 +762,32 @@ expect fx_bass 0
 turn ALGO -1
 wait 30
 expect fx_layer 0
+tap HOME
+wait 30
+# --- BLUETOOTH (GLO, segunda página): SEL busca; ALGORITHM elige; SEL conecta; el sonido va al aparato ---
+bta add CASCOS
+tap GLO
+wait 30
+tap GLO
+wait 30
+expect page 14
+shot bluetooth.png
+tap SEL
+wait 1200
+expect bta 2
+expect bt_pick 1
+tap SEL
+wait 500
+expect bta 7
+expect led_glo 1
+shot bluetooth_sonando.png
+turn K4 1
+wait 30
+expect bt_out 0
+turn K4 -1
+wait 30
+expect bt_out 1
+tap SEL
+wait 100
 tap HOME
 wait 30

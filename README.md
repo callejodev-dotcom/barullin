@@ -24,18 +24,23 @@ Los knobs K1–K4 son de la página en la que estás. Cada botón recorre sus p�
 | --- | --- | --- | --- | --- | --- | --- |
 | ARP | Arpegiador | silencio rápido (a 0 y vuelta) | octavas (1–3) | modo (sube, baja, sube-baja, azar) | paso (1/8, 1/8T, 1/16) | duración (ALGORITHM: ciclo en el compás, grupos de 4, o libre) |
 | | Bajo pulsado | sí / no (si el bajo está a 0, lo sube al 60 %) | paso (1/4, 1/8, 1/8T, 1/16) | patrón (nota, quinta, octava, acorde: las notas del que suena) | duración | octava (−1, 0, +1) |
-| FX | Delay (a tempo, rebote estéreo) | sí / no | tiempo (1/16–1/2) | repeticiones | tono de las repeticiones | mezcla de la capa elegida |
-| | Delay libre (en ms) | sí / no | tiempo (10–750 ms) | repeticiones | tono | mezcla de la capa elegida |
-| | Reverb | sí / no | sala | tono | ancho estéreo | mezcla de la capa elegida |
+| FX | Delay (a tempo, rebote estéreo) | silencio rápido | tiempo (1/16–1/2) | repeticiones | tono de las repeticiones | mezcla de la capa elegida |
+| | Delay libre (en ms) | silencio rápido | tiempo (10–750 ms) | repeticiones | tono | mezcla de la capa elegida |
+| | Reverb | silencio rápido | sala | tono | ancho estéreo | mezcla de la capa elegida |
 | ENV | Envolvente (ALGORITHM: de pad, arpegio o bajo) | — | ataque (2 ms–2 s) | caída (50 ms–3 s) | sostenido (0–100 %) | release (20 ms–4 s) |
 | LFO | LFO 1, 2, 3 (ALGORITHM: destino, ver abajo) | sí / no | velocidad (0,1–10 Hz) | cantidad | forma (seno, triángulo, cuadrada, azar) | a tempo (libre, 1/16 a 4 compases) |
 | EDIT | Ritmo | silencio rápido (con todo a 0, pone un ritmo básico) | bombo (a negras) | caja (en el 2 y el 4) | charles (a corcheas) | apertura del charles (de cerrado a abierto) |
 | GLO | Global | — | tonalidad | modo | sonido del pad (ver abajo; carga su envolvente, que luego tocas en ENV) | brillo (ALGORITHM: encadenar acordes sí/no) |
+| | Bluetooth (cascos y altavoces) | buscar / conectar lo elegido / colgar | — | — | — | salida: el aparato o el FM-1 (ALGORITHM: BUSCAR o un aparato) |
 | HOME | Principal | — | volumen pad | volumen bajo | volumen arpegio | volumen rasgueo |
 
 Pad, bajo, arpegio y rasgueo son capas independientes que suenan a la vez; cada una tiene su volumen en HOME. El bajo pulsado sustituye al sostenido mientras está encendido. El arpegiador y el bajo pulsado van a la misma rejilla del tempo. Van siempre con la rejilla del compás, que arranca con el primer acorde: los cambios de acorde caen en ella (CUADRAR), y si uno llega hasta 60 ms tarde, ese paso se repite con él. Con CUADRAR en AL MOMENTO, cada acorde nuevo arranca el arpegio y el bajo en el acto. Efectos y LFO vienen apagados de serie.
 
-Cada efecto lleva su mezcla por capas: en sus páginas, ALGORITHM elige la capa (pad, bajo, arpegio o rasgueo) y K4 cuánto manda esa capa al efecto. Arriba se ven las cuatro (P, B, A, R; la que lleva K4, resaltada). De serie, pad, arpegio y rasgueo van a los efectos y el bajo va seco.
+Cada efecto lleva su mezcla por capas: en sus páginas, ALGORITHM elige la capa (pad, bajo, arpegio o rasgueo) y K4 cuánto manda esa capa al efecto. Arriba se ven las cuatro (la que lleva K4, resaltada). De serie todas están a 0: un efecto suena en cuanto le subes la mezcla a una capa, como el arpegio con su volumen. SEL es un silencio rápido (y, con todo a 0, pone la capa elegida al 30 %).
+
+**Cada banco, su sonido.** Cada idea (SEQ) guarda su sonido: tono, modo, tempo, compás, sonido del pad, volúmenes, arpegiador, bajo pulsado, envolventes, efectos, LFO y ritmo. Al cambiar de banco suena el suyo; un banco que nunca se tocó empieza con todo de serie. Sonando, el cambio entra con el banco, al acabar el bucle. SAVE lo guarda todo. (Lo global, HOLD, CUADRAR y ENCADENAR, no cambia con el banco.)
+
+**Bluetooth** (GLO, segunda página): el sonido a cascos o altavoces. SEL con BUSCAR busca; ALGORITHM elige el aparato; SEL conecta (y, conectado, cuelga). Recuerda cuatro, y al encenderse vuelve a conectar el último. Mientras suena por Bluetooth, el FM-1 calla (K4 lo devuelve al FM-1 sin colgar). Llega 150–300 ms tarde: para escuchar lo hecho, no para tocar a tiempo.
 
 **Cada sección, su color**: la etiqueta con el nombre de la página, la raya y los nombres de los knobs van en el color de su botón (ARP azul, FX violeta, ENV verde, LFO rosa, EDIT rojo, GLO blanco; HOME, ámbar), y el mensaje de arriba también.
 
