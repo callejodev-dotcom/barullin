@@ -133,3 +133,57 @@ tap ARP
 wait 30
 expect arp 0
 expect page 0
+# --- ideas: REC graba los cambios de acorde, PLAY los repite (100 BPM: corchea = 300 ms) ---
+expect tempo 120
+turn SELECT -20
+wait 30
+tap REC
+wait 30
+expect rec 1
+key 0 down
+wait 30
+key 0 up
+expect rec 2
+# cuatro corcheas despues, el IV (tecla 6)
+wait 1170
+key 6 down
+wait 30
+key 6 up
+# y al cumplir el compas (8 corcheas = 2400 ms), REC: un compas, y suena
+wait 1170
+tap REC
+wait 30
+expect rec 0
+expect loop_len 8
+expect loop_n 2
+expect playing 1
+expect degree 0
+shot rec_play.png
+wait 1300
+expect degree 3
+wait 1200
+expect degree 0
+# una tecla en directo manda mientras se mantiene
+key 9 down
+wait 30
+expect degree 5
+key 9 up
+wait 50
+expect degree 0
+# PLAY para; PLAY vuelve a sonar desde el principio
+tap PLAY
+wait 30
+expect playing 0
+expect degree -1
+tap PLAY
+wait 30
+expect playing 1
+expect degree 0
+# se guarda con SAVE
+tap SAVE
+wait 30
+reboot
+wait 600
+expect loop_len 8
+expect loop_n 2
+expect playing 0

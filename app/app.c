@@ -14,7 +14,10 @@
 #define SR 44100.0f
 
 /* ------------------------------------------------------------- ajustes --- */
-#define SET_MAGIC 0x42524C33u            /* "BRL3" */
+#define SET_MAGIC 0x42524C34u            /* "BRL4" */
+#define LOOP_MAX 64                      /* cambios de acorde en una idea */
+#define LOOP_STEPS 128                   /* 16 compases de corcheas */
+typedef struct { uint8_t step; int8_t degree; uint8_t mods; uint8_t inv; } loop_ev_t;
 typedef struct {
     uint32_t magic;
     uint8_t key;                         /* 0 = C .. 11 = B */
@@ -29,7 +32,9 @@ typedef struct {
     uint8_t arp_oct;                     /* 1..3 octavas */
     uint8_t arp_len;                     /* 1..9: duración de cada nota, en décimas del paso */
     uint8_t tempo;                       /* 40..220 BPM */
-    uint8_t rsv[2];
+    uint8_t loop_len;                    /* la idea grabada: corcheas (0: no hay), compases enteros */
+    uint8_t loop_n;                      /* sus cambios de acorde */
+    loop_ev_t loop_ev[LOOP_MAX];
 } settings_t;
 static settings_t set;
 static uint8_t set_dirty;
@@ -313,7 +318,11 @@ static struct {
     uint8_t redraw;
     uint8_t gate_hold_off;
     uint8_t arp_turned;
-    uint8_t page;                        /* de quién son K1..K4: 0 el acorde, 1 el arpegiador */                  /* con ARP mantenido se giró un knob: al soltar no se conmuta */
+    uint8_t page;
+    uint8_t rec;                         /* 0 no, 1 armado (espera el primer acorde), 2 grabando */
+    uint8_t playing;
+    float rec_acc, play_acc;             /* corcheas desde que empezó la grabación / dentro del bucle */
+    uint32_t rec_sig, last_ms, shown_pos;                        /* de quién son K1..K4: 0 el acorde, 1 el arpegiador */                  /* con ARP mantenido se giró un knob: al soltar no se conmuta */
     uint32_t stop_t;                     /* la tecla STOP bajó (0: no está pulsada, o ya actuó)
                                           * corta: para el acorde; un segundo: HOLD sí / no */
 } st;
@@ -339,6 +348,8 @@ static void settings_defaults(void)
     set.arp_oct = 1;
     set.arp_len = 5;
     set.tempo = 100;
+    set.loop_len = 0;
+    set.loop_n = 0;
 }
 
 static void settings_load(void)
@@ -347,7 +358,8 @@ static void settings_load(void)
         || set.key > 11u || set.mode >= BL_MODE_COUNT || set.octave < -2 || set.octave > 2
         || set.bright > 20u || set.lead > 1u || set.hold > 1u
         || set.arp > 1u || set.arp_mode > 3u || set.arp_div > 2u || set.arp_oct < 1u || set.arp_oct > 3u
-        || set.arp_len < 1u || set.arp_len > 9u || set.tempo < 40u || set.tempo > 220u)
+        || set.arp_len < 1u || set.arp_len > 9u || set.tempo < 40u || set.tempo > 220u
+        || set.loop_len > LOOP_STEPS || set.loop_n > LOOP_MAX || (set.loop_len && !set.loop_n))
         settings_defaults();
 }
 
@@ -356,6 +368,12 @@ void app_init(void)
     settings_load();
     cut_update();
     st.degree = -1;
+    st.gate = 0;
+    st.sig = 0;
+    st.rec = 0;
+    st.playing = 0;
+    st.page = 0;
+    st.gate_hold_off = 0;
     bl_chord_build(set.key, set.mode, 0, 0, 0, 60 + 12 * set.octave, &st.cur);
     st.prev = st.cur;
 }
@@ -478,14 +496,95 @@ static void set_changed(const char *a, const char *b)
     app_say(a, b);
 }
 
+/* ------------------------------------------------------ ideas: REC / PLAY --- */
+/* Se graban los cambios de acorde (grado, modificadores, inversión) en corcheas al tempo; el bucle dura
+ * compases enteros. Las teclas en directo mandan sobre lo grabado mientras se mantienen. */
+static float eighth_ms(void) { return 30000.0f / (float)set.tempo; }
+
+static void seq_tick(void)
+{
+    uint32_t now = plat_ms();
+    float d = (float)(now - st.last_ms) / eighth_ms();
+    st.last_ms = now;
+    if (st.rec == 2) st.rec_acc += d;
+    if (st.playing && set.loop_len) {
+        st.play_acc += d;
+        while (st.play_acc >= (float)set.loop_len) st.play_acc -= (float)set.loop_len;
+    }
+}
+
+static void seq_current(int *degree, unsigned *mods, int *inv)
+{
+    int i, k = set.loop_n - 1;
+    uint32_t pos = (uint32_t)st.play_acc;
+    for (i = 0; i < set.loop_n; i++)
+        if (set.loop_ev[i].step <= pos) k = i;
+    *degree = set.loop_ev[k].degree;
+    *mods = set.loop_ev[k].mods;
+    *inv = set.loop_ev[k].inv;
+}
+
+static void seq_play(int on)
+{
+    st.playing = (uint8_t)(on && set.loop_len);
+    st.play_acc = 0.0f;
+    if (!st.playing) st.gate_hold_off = 1;   /* al parar, el acorde calla */
+    st.redraw = 1;
+}
+
+static void seq_finish(void)
+{
+    int len = ((int)(st.rec_acc + 4.0f) / 8) * 8;   /* al compás más cercano */
+    st.rec = 0;
+    if (!set.loop_n) { app_say("REC", "NADA"); return; }
+    if (len < 8) len = 8;
+    while (len <= set.loop_ev[set.loop_n - 1].step) len += 8;
+    if (len > LOOP_STEPS) len = LOOP_STEPS;
+    set.loop_len = (uint8_t)len;
+    set_dirty = 1;
+    {
+        char t[12];
+        int_text(len / 8, t);
+        text_cat(t, len == 8 ? " COMPAS" : " COMPASES");
+        app_say("IDEA", t);
+    }
+    seq_play(1);
+}
+
+static void seq_record(int degree, unsigned mods, int inv, int live)
+{
+    uint32_t sig = (uint32_t)(degree + 1) | mods << 4 | (uint32_t)inv << 12;
+    int step;
+    if (st.rec == 1 && live) {               /* el primer acorde que se toca: empieza */
+        st.rec = 2;
+        st.rec_acc = 0.0f;
+        set.loop_n = 0;
+        set.loop_len = 0;
+        st.rec_sig = ~0u;
+    }
+    if (st.rec != 2 || sig == st.rec_sig) return;
+    st.rec_sig = sig;
+    step = (int)(st.rec_acc + 0.5f);
+    if (step >= LOOP_STEPS) { seq_finish(); return; }
+    if (set.loop_n && set.loop_ev[set.loop_n - 1].step == step) set.loop_n--;   /* en la misma corchea: el último */
+    if (set.loop_n < LOOP_MAX) {
+        loop_ev_t *ev = &set.loop_ev[set.loop_n++];
+        ev->step = (uint8_t)step;
+        ev->degree = (int8_t)degree;
+        ev->mods = (uint8_t)mods;
+        ev->inv = (uint8_t)inv;
+    }
+}
+
 static void input(void)
 {
     uint32_t keys, btn = plat_buttons(), k;
     unsigned mods = 0;
-    int inv = 0, degree = -1, i;
+    int inv = 0, degree = -1, live_degree, i;
     int32_t e;
     touch_poll();
     keys = touch_keys();
+    seq_tick();
 
     /* grados: el último pulsado manda */
     for (i = 0; i < NDEG; i++) {
@@ -501,6 +600,7 @@ static void input(void)
                 degree = i;
             }
     }
+    live_degree = degree;
     /* modificadores, inversiones y HOLD */
     for (i = 0; i < 8; i++) if (keys >> BK[i] & 1u) mods |= BK_MOD[i];
     if (keys >> BK[BK_INV1] & 1u) inv = 1;
@@ -513,17 +613,22 @@ static void input(void)
             set.hold = (uint8_t)!set.hold;
             set_changed("HOLD", set.hold ? "SI" : "NO");
         }
-        if (!down && was && st.stop_t) {   /* pulsación corta: STOP */
+        if (!down && was && st.stop_t) {   /* pulsación corta: STOP (y la idea deja de sonar) */
             st.stop_t = 0;
+            if (st.playing) seq_play(0);
             if (degree < 0) st.gate_hold_off = 1;
         }
     }
-    if (st.gate_hold_off) {                /* parado: hasta el siguiente grado */
+    if (st.playing && degree < 0 && !mods && !inv) {   /* la idea suena: lo grabado, salvo lo que se toque */
+        seq_current(&degree, &mods, &inv);
+        st.gate_hold_off = 0;
+    } else if (st.gate_hold_off) {                /* parado: hasta el siguiente grado */
         if (degree >= 0) st.gate_hold_off = 0;
     } else if (degree < 0 && set.hold && st.gate) {   /* HOLD: el acorde sigue; los modificadores aún lo cambian */
         degree = st.degree;
         if (!mods) mods = st.mods;
     }
+    seq_record(degree, mods, inv, live_degree >= 0);
     chord_update(degree, mods, inv);
 
     /* rasgueo */
@@ -549,6 +654,22 @@ static void input(void)
             set.octave = (int8_t)(set.octave + (k == B_OCTUP ? 1 : -1));
             int_text(set.octave, t);
             set_changed("OCTAVA", t);
+        } else if (k == B_REC) {
+            if (st.rec == 0) {
+                if (st.playing) seq_play(0);
+                st.rec = 1;
+                st.gate_hold_off = 1;        /* lo que sonaba calla: la idea empieza con lo que toques */
+                app_say("REC", "TOCA");
+            } else if (st.rec == 1) {
+                st.rec = 0;
+                app_say("REC", "NO");
+            } else {
+                seq_finish();
+            }
+        } else if (k == B_PLAY) {
+            if (st.rec == 2) seq_finish();
+            else if (!set.loop_len) app_say("PLAY", "GRABA CON REC");
+            else seq_play(!st.playing);
         } else if (k == B_HOME) {
             st.page = 0;                     /* los knobs vuelven al acorde (el arpegio sigue) */
         } else if (k == B_ARP) {
@@ -618,7 +739,17 @@ static void input(void)
     st.keys = keys;
     st.btn = btn;
     plat_glow(1);
-    plat_leds(btn | (set_dirty ? 1u << B_SAVE : 0u) | (set.arp ? 1u << B_ARP : 0u), keys);
+    {
+        uint32_t lit = btn | (set_dirty ? 1u << B_SAVE : 0u) | (set.arp ? 1u << B_ARP : 0u);
+        if (st.playing || st.rec == 2) lit |= 1u << B_PLAY;
+        if (st.rec == 2 || (st.rec == 1 && (plat_ms() / 250u) & 1u)) lit |= 1u << B_REC;   /* armado: parpadea */
+        plat_play_red(st.rec == 2);
+        plat_leds(lit, keys);
+    }
+    {   /* la posición en pantalla, al cambiar de pulso */
+        uint32_t pos = st.playing ? (uint32_t)st.play_acc / 2u + 1u : st.rec == 2 ? (uint32_t)st.rec_acc / 2u + 1000u : 0u;
+        if (pos != st.shown_pos) { st.shown_pos = pos; st.redraw = 1; }
+    }
 }
 
 void app_input_only(void) { input(); }
@@ -664,6 +795,20 @@ static void draw(void)
         int32_t w = text_w(&FONT_L, c->name);
         char rom[8];
         cv_text((240 - w) / 2, 6, &FONT_L, c->name, col);
+        if (st.rec || st.playing) {          /* REC / PLAY y compás.pulso */
+            char b[16] = "";
+            uint32_t p = (uint32_t)(st.playing ? st.play_acc : st.rec_acc);
+            if (st.rec == 1) text_cat(b, "REC ...");
+            else {
+                char n[8];
+                text_cat(b, st.rec == 2 ? "REC " : "PLAY ");
+                int_text((int32_t)(p / 8u + 1u), n); text_cat(b, n);
+                text_cat(b, ".");
+                int_text((int32_t)(p % 8u / 2u + 1u), n); text_cat(b, n);
+                if (st.playing) { text_cat(b, "/"); int_text(set.loop_len / 8, n); text_cat(b, n); }
+            }
+            cv_text(6, 4, &FONT_XS, b, st.rec ? C_WHITE : C_HI);
+        }
         bl_degree_name(c, st.degree < 0 ? 0 : st.degree, rom, sizeof rom);
         if (st.degree >= 0) cv_text((240 - text_w(&FONT_B, rom)) / 2, 44, &FONT_B, rom, st.gate ? C_AMB : C_DIM);
         /* las notas, nombradas */
@@ -775,6 +920,10 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "dirty")) *got = set_dirty;
     else if (!strcmp(what, "arp")) *got = set.arp;
     else if (!strcmp(what, "page")) *got = st.page;
+    else if (!strcmp(what, "rec")) *got = st.rec;
+    else if (!strcmp(what, "playing")) *got = st.playing;
+    else if (!strcmp(what, "loop_len")) *got = set.loop_len;
+    else if (!strcmp(what, "loop_n")) *got = set.loop_n;
     else if (!strcmp(what, "arp_mode")) *got = set.arp_mode;
     else if (!strcmp(what, "tempo")) *got = set.tempo;
     else if (!strcmp(what, "arp_moving")) *got = arp_steps >= 4u;   /* al menos cuatro pasos tocados */

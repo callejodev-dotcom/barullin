@@ -18,8 +18,10 @@ Construido sobre [fm1-base](https://github.com/charlesvestal/fm1-base) de Charle
 | HOME | Los knobs vuelven al acorde (el arpegio sigue sonando) |
 | ARP mantenido + K1 / K2 / K3 / K4 | Modo (sube, baja, sube-baja, azar) / paso (1/8, 1/8T, 1/16) / octavas (1–3) / duración de cada nota |
 | SELECT | Tempo (40–220 BPM) |
+| REC | Graba una idea: empieza con el primer acorde que toques; REC otra vez la cierra (a compases enteros) y la pone en bucle |
+| PLAY | Reproduce o para la idea grabada. Mientras suena, lo que toques en directo manda |
 | OCT− / OCT+ | Octava |
-| SAVE | Guarda los ajustes |
+| SAVE | Guarda los ajustes y la idea grabada |
 
 Los modificadores se combinan: `7` + `9` da maj9, m9 o 9 según el grado; `sus4` + `7` da 7sus4.
 
@@ -57,7 +59,7 @@ python3 base/tools/fm1_install.py app/build/barullin.fwsc         # instalar en 
 - [x] Rasgueo, bajo y pad; salida MIDI
 - [x] Arpegiador con reloj MIDI
 - [ ] Ritmos de acompañamiento
-- [ ] Secuenciador de progresiones
+- [x] Grabar y repetir ideas (REC / PLAY)
 - [ ] Reloj MIDI y start/stop para el directo
 - [ ] Motor de pad tipo Juno (de Barullo Xuno)
 
