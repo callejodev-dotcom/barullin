@@ -327,8 +327,9 @@ key 25 up
 key 0 down
 wait 200
 expect pad_on 1
+# sin sostenido se apaga solo... y vuelve a tocar al empezar el compás siguiente (a 100 BPM, 2,4 s)
 wait 3000
-expect pad_on 0
+expect pad_on 1
 expect degree 0
 key 0 up
 turn K3 10

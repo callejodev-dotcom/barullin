@@ -233,7 +233,7 @@ static volatile uint32_t tp_reset_req;   /* el UI pide reiniciar (PLAY): distint
 static uint32_t tp_reset_done;
 static volatile uint8_t tp_locked;       /* una idea suena: un acorde nuevo no reinicia el reloj */
 static int tp_gate_was;
-static uint32_t clk_last = ~0u, arp_last = ~0u, bp_last = ~0u;   /* el último paso tocado de cada uno */
+static uint32_t clk_last = ~0u, arp_last = ~0u, bp_last = ~0u, bar_last = ~0u;   /* el último paso tocado de cada uno */
 static uint32_t arp_i, arp_rng = 0x1234567u;
 static volatile uint32_t arp_steps;      /* pasos tocados (para las pruebas) */
 
@@ -755,7 +755,7 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             tp_bfrac = 0.0f;
             pf_bint = 0;
             pf_bfrac = 0.0f;
-            clk_last = arp_last = bp_last = drum_last = ~0u;
+            clk_last = arp_last = bp_last = drum_last = bar_last = ~0u;
             tp_resets++;
         } else if (chord_new && achord.gate && tp_gate_was && !tp_locked && !set.quant) {
             pf_bint = 0;                     /* en directo, acorde nuevo: el arpegio y el bajo, en el acto */
@@ -783,6 +783,14 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             if (pf_bfrac >= 1.0f) { pf_bfrac -= 1.0f; pf_bint++; }
             arp_age++;
             bp_age++;
+            idx = tp_bint * 2u + (tp_bfrac >= 0.5f ? 1u : 0u);   /* corcheas: al empezar cada compás, un pad sin
+                                                                   * sostenido (piano, campana) vuelve a tocar */
+            if (idx != bar_last) {
+                bar_last = idx;
+                if (idx % MT->bar8 == 0u && set.env_s == 0u && achord.gate) {
+                    for (j = 0; j < NPAD; j++) if (pad[j].gate) pad[j].stage = 0;
+                }
+            }
             idx = tp_bint * 24u + (uint32_t)(tp_bfrac * 24.0f);
             if (idx != clk_last) { clk_last = idx; if (ARP_ON || set.bp_on || DRUM_ON) midi_rt(0xF8u); }
             if (ARP_ON) {
@@ -817,7 +825,8 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
                 float a;
                 PAD_ENV(v);
                 if (v->env == 0.0f) continue;
-                v->p1 += v->i1 * pitch_pad; if (v->p1 >= 1.0f) v->p1 -= 1.0f;
+                v->p1 += v->i1 * pitch_pad * (snd == SND_EP ? 0.5f : 1.0f);   /* el piano, una octava abajo */
+                if (v->p1 >= 1.0f) v->p1 -= 1.0f;
                 if (snd == SND_EP) a = tsin(v->p1 + 1.0f + mi * v->env * tsin(v->p1));
                 else {
                     v->p2 += v->i1 * pitch_pad * 3.5f; if (v->p2 >= 1.0f) v->p2 -= 1.0f;   /* 3,5: inarmónica */
