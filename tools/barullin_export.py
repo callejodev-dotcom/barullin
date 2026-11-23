@@ -331,14 +331,25 @@ def is_pointee(tag):
     return tag in POINTEE_TAGS or tag.endswith("ModulationTarget") or tag.startswith("ControllerTargets.")
 
 
-def write_als(path, ideas_out):
-    """ideas_out: lista de 8 (None o (título, tempo, compás, partes, pulsos))"""
-    tpl = os.path.join(HERE, "ableton", "plantilla.als")
-    root = ET.fromstring(gzip.open(tpl).read())
+def write_als(path, ideas_out, tpl=None):
+    """ideas_out: lista de 8 (None o (título, tempo, compás, partes, pulsos)); tpl: un Live Set de molde (de serie,
+    tools/ableton/plantilla.als; mejor uno vacío guardado con tu propio Live: --plantilla)"""
+    tpl = tpl or os.path.join(HERE, "ableton", "plantilla.als")
+    raw = open(tpl, "rb").read()
+    root = ET.fromstring(gzip.decompress(raw) if raw[:2] == b"\x1f\x8b" else raw)
     ls = root.find("LiveSet")
     tracks = ls.find("Tracks")
-    proto = copy.deepcopy(tracks.find("MidiTrack"))
-    clip_proto = copy.deepcopy(proto.find(".//MidiClip"))
+    mtracks = tracks.findall("MidiTrack")
+    if not mtracks:
+        raise SystemExit("la plantilla de Ableton necesita al menos una pista MIDI")
+    # de molde: la pista MIDI sin aparatos, si hay; el clip, el de la plantilla o el nuestro (tools/ableton/clip.xml)
+    clean = [t for t in mtracks if not len(t.find("DeviceChain/DeviceChain/Devices"))]
+    proto = copy.deepcopy((clean or mtracks)[0])
+    c = proto.find(".//MidiClip")
+    clip_proto = copy.deepcopy(c) if c is not None else ET.fromstring(open(os.path.join(HERE, "ableton", "clip.xml"), "rb").read())
+    gs = clip_proto.find("GrooveSettings/GrooveId")
+    if gs is not None:
+        gs.set("Value", "-1")
     for t in list(tracks):
         if t.tag != "ReturnTrack":
             tracks.remove(t)
@@ -472,6 +483,7 @@ def main():
     ap.add_argument("--salida", default="Barullin Export")
     ap.add_argument("--vueltas", type=int, default=1, help="cuántas veces se repite cada idea en el MIDI")
     ap.add_argument("--port")
+    ap.add_argument("--plantilla", help="un Live Set vacío guardado con tu Ableton (con una pista MIDI), de molde")
     a = ap.parse_args()
     os.makedirs(a.salida, exist_ok=True)
     bk = a.desde or os.path.join(a.salida, "Barullin.barullin")
@@ -501,7 +513,7 @@ def main():
     if not any(out):
         raise SystemExit("no hay ideas guardadas (graba con REC y guarda con SAVE)")
     als = os.path.join(a.salida, "Barullin Project", "Barullin.als")
-    write_als(als, out)
+    write_als(als, out, a.plantilla)
     print(f"  {als}  (una escena por idea; arrastra un instrumento a cada pista)")
     print("hecho: " + os.path.abspath(a.salida))
 
