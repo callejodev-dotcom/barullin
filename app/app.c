@@ -14,7 +14,7 @@
 #define SR 44100.0f
 
 /* ------------------------------------------------------------- ajustes --- */
-#define SET_MAGIC 0x42524C4Bu            /* "BRLK" */
+#define SET_MAGIC 0x42524C4Cu            /* "BRLL" */
 #define LOOP_MAX 64                      /* cambios de acorde en una idea */
 #define LOOP_STEPS 128                   /* 16 compases de corcheas */
 typedef struct { uint8_t step; int8_t degree; uint8_t mods; uint8_t inv; } loop_ev_t;
@@ -50,6 +50,7 @@ typedef struct {
     int8_t octave;                       /* -2 .. +2 */
     uint8_t bright;                      /* 0..20: el corte del filtro del pad */
     uint8_t lead;                        /* voice leading */
+    uint8_t sound;                       /* el sonido del pad (GLO, K3): enum snd */
     uint8_t quant;                       /* cuadrar los cambios de acorde: 0 al momento, 1 corchea, 2 negra, 3 compás */
     uint8_t hold;                        /* el acorde sigue al soltar (por defecto, sí) */
     uint8_t arp_free;                    /* ciclo del arpegio: 0 en el compás (grupos de 4), 1 libre */
@@ -175,6 +176,21 @@ static void pluck(int note, int vel)
 
 /* ---------------------------------------------------------------- audio --- */
 #define NPAD 6
+/* Los sonidos del pad. Cada uno: su forma de onda, su brillo de partida (en pasos de 1/4 de octava sobre
+ * BRILLO), su volumen y la envolvente que carga al elegirlo (ataque, caída, sostenido, release). */
+enum snd { SND_SAW, SND_STRINGS, SND_ORGAN, SND_EP, SND_BELL, SND_GLASS, SND_PULSE, NSND };
+static const char *const SND_NAME[NSND] = {"SIERRAS", "CUERDAS", "ORGANO", "PIANO EL", "CAMPANA", "CRISTAL", "PULSO"};
+static const int8_t SND_BRI[NSND] = {0, -3, 4, 12, 12, 12, -1};
+static const float SND_GAIN[NSND] = {1.0f, 0.9f, 0.8f, 1.9f, 1.3f, 1.0f, 0.75f};
+static const uint8_t SND_ENV[NSND][4] = {
+    {5, 5, 10, 5},   /* sierras: lo de siempre */
+    {7, 5, 10, 7},   /* cuerdas: entran despacio y se quedan */
+    {0, 5, 10, 2},   /* órgano: en el acto, y fuera */
+    {0, 7, 0, 4},    /* piano eléctrico: golpe que se apaga */
+    {0, 9, 0, 6},    /* campana: golpe y cola larga */
+    {3, 6, 7, 6},    /* cristal */
+    {2, 5, 8, 4},    /* pulso */
+};
 #define NPLK 12
 typedef struct { float p1, p2, i1, i2, env; int note, gate, stage; } pad_v;   /* stage: 0 ataque, 1 caída */
 
@@ -636,7 +652,7 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             }
         }
         if (D[D_PAD_FILT] > 0.0f) {          /* filtro del pad: hasta dos octavas arriba y abajo */
-            float fc = 300.0f * fm_exp2f((float)set.bright * 0.25f + M[D_PAD_FILT] * 2.0f);
+            float fc = 300.0f * fm_exp2f((float)(set.bright + SND_BRI[set.sound % NSND]) * 0.25f + M[D_PAD_FILT] * 2.0f);
             if (fc > 16000.0f) fc = 16000.0f;
             cut = 1.0f - fm_expf(-6.2831853f * fc / SR);
         }
@@ -658,7 +674,9 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         arp_len_mul = fm_clampf(1.0f + 0.8f * M[D_ARP_LEN], 0.15f, 1.9f);
         bp_len_mul = fm_clampf(1.0f + 0.8f * M[D_BASS_LEN], 0.15f, 1.9f);
     }
-    float pm1 = pitch_pad * (1.0f + det), pm2 = pitch_pad * (1.0f - det);   /* las dos sierras del pad */
+    int snd = set.sound % NSND;
+    float sdet = snd == SND_STRINGS ? det * 2.5f : snd == SND_ORGAN ? det * 0.5f : det;   /* cuerdas: más anchas */
+    float pm1 = pitch_pad * (1.0f + sdet), pm2 = pitch_pad * (1.0f - sdet);   /* los dos osciladores del pad */
     float padL = 1.0f, padR = 1.0f, arpL = 0.0f, arpR = 0.0f, bassG = 0.0f, drumG = 1.0f, hatG = 1.0f, outG = 0.0f;
     float harm_a = fm_maxf(0.0f, 0.35f * (1.0f + M[D_ARP_BRIGHT])), harm_b = fm_maxf(0.0f, 0.25f * (1.0f + M[D_BASS_BRIGHT]));
     float gain = (float)master_q12 / 4096.0f * 7000000.0f;
@@ -677,6 +695,7 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     /* los volúmenes de HOME: 8 es el nivel de antes (el bajo, de serie en 6: tapaba al pad) */
     float g_pad = 0.11f * (float)set.vol_pad / VOL_UNITY, g_bass = (float)set.vol_bass / VOL_UNITY;
     float g_arp = (float)set.vol_arp / VOL_UNITY, g_strum = (float)set.vol_strum / VOL_UNITY;
+    float gpad = g_pad * SND_GAIN[set.sound % NSND];
     rv_fb = 0.70f + (float)set.rev_size * 0.024f;
     rv_tone = 0.25f + (float)set.rev_tone * 0.08f;
     {   /* la envolvente, una vez por bloque */
@@ -775,18 +794,83 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
                 if (idx != drum_last) { drum_last = idx; if (achord.gate) drum_step(idx % MT->bar8); }
             }
         }
-        for (j = 0; j < NPAD; j++) {
-            pad_v *v = &pad[j];
-            if (v->gate) {
-                if (v->stage == 0) { v->env += e_att; if (v->env >= 1.0f) { v->env = 1.0f; v->stage = 1; } }
-                else v->env = e_sus + (v->env - e_sus) * e_dec;
-            } else if (v->env > 0.0f) { v->env *= e_rel; if (v->env < 0.0001f) v->env = 0.0f; }
-            if (v->env == 0.0f) continue;
-            v->p1 += v->i1 * pm1; if (v->p1 >= 1.0f) v->p1 -= 1.0f;
-            v->p2 += v->i2 * pm2; if (v->p2 >= 1.0f) v->p2 -= 1.0f;
-            l += (2.0f * v->p1 - 1.0f) * v->env * g_pad;
-            r += (2.0f * v->p2 - 1.0f) * v->env * g_pad;
+        /* el pad: un bucle por sonido (sin decidir el sonido en cada voz y cada muestra) */
+#define PAD_ENV(v) do { \
+            if ((v)->gate) { \
+                if ((v)->stage == 0) { (v)->env += e_att; if ((v)->env >= 1.0f) { (v)->env = 1.0f; (v)->stage = 1; } } \
+                else (v)->env = e_sus + ((v)->env - e_sus) * e_dec; \
+            } else if ((v)->env > 0.0f) { (v)->env *= e_rel; if ((v)->env < 0.0001f) (v)->env = 0.0f; } \
+        } while (0)
+#define PAD_PH2(v) do { (v)->p1 += (v)->i1 * pm1; if ((v)->p1 >= 1.0f) (v)->p1 -= 1.0f; \
+                        (v)->p2 += (v)->i2 * pm2; if ((v)->p2 >= 1.0f) (v)->p2 -= 1.0f; } while (0)
+        switch (snd) {
+        case SND_EP: case SND_BELL: {        /* FM: un seno que modula a otro, más brillo al golpe */
+            float mi = snd == SND_EP ? 0.30f : 0.45f;
+            for (j = 0; j < NPAD; j++) {
+                pad_v *v = &pad[j];
+                float a;
+                PAD_ENV(v);
+                if (v->env == 0.0f) continue;
+                v->p1 += v->i1 * pitch_pad; if (v->p1 >= 1.0f) v->p1 -= 1.0f;
+                if (snd == SND_EP) a = tsin(v->p1 + 1.0f + mi * v->env * tsin(v->p1));
+                else {
+                    v->p2 += v->i1 * pitch_pad * 3.5f; if (v->p2 >= 1.0f) v->p2 -= 1.0f;   /* 3,5: inarmónica */
+                    a = tsin(v->p1 + 1.0f + mi * v->env * tsin(v->p2));
+                }
+                a *= v->env;
+                l += a;
+                r += a;
+            }
+            break;
         }
+        case SND_ORGAN:                      /* triángulo y su octava: flauta de órgano */
+            for (j = 0; j < NPAD; j++) {
+                pad_v *v = &pad[j];
+                float a, b, q;
+                PAD_ENV(v);
+                if (v->env == 0.0f) continue;
+                PAD_PH2(v);
+                q = v->p1 * 2.0f; if (q >= 1.0f) q -= 1.0f;
+                a = 1.5f - 4.0f * fm_fabsf(v->p1 - 0.5f) - 2.0f * fm_fabsf(q - 0.5f);
+                q = v->p2 * 2.0f; if (q >= 1.0f) q -= 1.0f;
+                b = 1.5f - 4.0f * fm_fabsf(v->p2 - 0.5f) - 2.0f * fm_fabsf(q - 0.5f);
+                l += a * v->env;
+                r += b * v->env;
+            }
+            break;
+        case SND_GLASS:
+            for (j = 0; j < NPAD; j++) {
+                pad_v *v = &pad[j];
+                PAD_ENV(v);
+                if (v->env == 0.0f) continue;
+                PAD_PH2(v);
+                l += tsin(v->p1) * v->env;
+                r += tsin(v->p2) * v->env;
+            }
+            break;
+        case SND_PULSE:
+            for (j = 0; j < NPAD; j++) {
+                pad_v *v = &pad[j];
+                PAD_ENV(v);
+                if (v->env == 0.0f) continue;
+                PAD_PH2(v);
+                l += v->p1 < 0.5f ? v->env : -v->env;
+                r += v->p2 < 0.3f ? v->env : -v->env;
+            }
+            break;
+        default:                             /* sierras, cuerdas */
+            for (j = 0; j < NPAD; j++) {
+                pad_v *v = &pad[j];
+                PAD_ENV(v);
+                if (v->env == 0.0f) continue;
+                PAD_PH2(v);
+                l += (2.0f * v->p1 - 1.0f) * v->env;
+                r += (2.0f * v->p2 - 1.0f) * v->env;
+            }
+            break;
+        }
+        l *= gpad;
+        r *= gpad;
         /* filtro paso bajo de dos polos por canal: el pad, tibio */
         lp1[0] += (l - lp1[0]) * cut; lp2[0] += (lp1[0] - lp2[0]) * cut;
         lp1[1] += (r - lp1[1]) * cut; lp2[1] += (lp1[1] - lp2[1]) * cut;
@@ -950,7 +1034,8 @@ static struct {
 
 static void cut_update(void)
 {
-    float fc = 300.0f * fm_exp2f((float)set.bright * 0.25f);   /* 300 Hz .. ~9,6 kHz */
+    float fc = 300.0f * fm_exp2f((float)(set.bright + SND_BRI[set.sound % NSND]) * 0.25f);   /* 300 Hz .. */
+    if (fc > 16000.0f) fc = 16000.0f;
     snd_cut = 1.0f - fm_expf(-6.2831853f * fc / SR);
 }
 
@@ -962,6 +1047,7 @@ static void settings_defaults(void)
     set.octave = 0;
     set.bright = 10;
     set.lead = 1;
+    set.sound = SND_SAW;
     set.quant = 2;
     set.hold = 1;
     set.arp_mute_vol = VOL_UNITY;
@@ -1050,7 +1136,7 @@ static void settings_load(void)
 {
     if (plat_store_load(OBJ_SETTINGS, &set, sizeof set) != (int)sizeof set || set.magic != SET_MAGIC
         || set.key > 11u || set.mode >= BL_MODE_COUNT || set.octave < -2 || set.octave > 2
-        || set.bright > 20u || set.lead > 1u || set.quant > 3u || set.hold > 1u
+        || set.bright > 20u || set.lead > 1u || set.sound >= NSND || set.quant > 3u || set.hold > 1u
         || set.arp_mute_vol > VOL_MAX || set.arp_free > 1u || set.meter >= NMETER || set.arp_mode > 3u || set.arp_div > 2u || set.arp_oct < 1u || set.arp_oct > 3u
         || set.arp_len < 1u || set.arp_len > 9u || set.tempo < 40u || set.tempo > 220u
         || set.dly_mix > 10u || set.dly_div > 5u || set.dly_fb > 9u || set.rev_mix > 10u
@@ -1757,10 +1843,14 @@ static void input(void)
                 set.mode = (uint8_t)clamp((int32_t)set.mode + e, 0, BL_MODE_COUNT - 1);
                 key_text(t);
                 set_changed("MODO", t);
-            } else if (k == EN_K3) {
-                set.octave = (int8_t)clamp(set.octave + e, -2, 2);
-                int_text(set.octave, t);
-                set_changed("OCTAVA", t);
+            } else if (k == EN_K3) {         /* el sonido del pad: carga su envolvente */
+                set.sound = (uint8_t)clamp((int32_t)set.sound + e, 0, NSND - 1);
+                set.env_a = SND_ENV[set.sound][0];
+                set.env_d = SND_ENV[set.sound][1];
+                set.env_s = SND_ENV[set.sound][2];
+                set.env_r = SND_ENV[set.sound][3];
+                cut_update();
+                set_changed("SONIDO", SND_NAME[set.sound]);
             } else {
                 set.bright = (uint8_t)clamp((int32_t)set.bright + e, 0, 20);
                 cut_update();
@@ -1961,10 +2051,10 @@ static void draw(void)
             int_text(set.drm_hopen * 10, v[3]); text_cat(v[3], "%");
         } else if (pg == PG_GLO) {
             text_cat(head, set.lead ? "  ENCADENAR SI" : "  ENCADENAR NO");
-            lbl[0] = "TONO"; lbl[1] = "MODO"; lbl[2] = "OCTAVA"; lbl[3] = "BRILLO";
+            lbl[0] = "TONO"; lbl[1] = "MODO"; lbl[2] = "SONIDO"; lbl[3] = "BRILLO";
             text_cat(v[0], bl_note_name(set.key, set.key));
             text_cat(v[1], MODE_NAME[set.mode]);
-            int_text(set.octave, v[2]);
+            text_cat(v[2], SND_NAME[set.sound % NSND]);
             int_text(set.bright * 5, v[3]);
         } else if (pg == PG_BP) {
             lbl[0] = "PASO"; lbl[1] = "PATRON"; lbl[2] = "LARGO"; lbl[3] = "OCTAVA";
@@ -2082,6 +2172,7 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "drum_hits")) *got = drum_hits >= 4u;
     else if (!strcmp(what, "d2_ms")) *got = set.d2_ms;
     else if (!strcmp(what, "quant")) *got = set.quant;
+    else if (!strcmp(what, "sound")) *got = set.sound;
     else if (!strcmp(what, "q_pend")) *got = st.q_pend;
     else if (!strcmp(what, "d2_on")) *got = set.d2_on;
     else if (!strcmp(what, "page")) *got = st.page;

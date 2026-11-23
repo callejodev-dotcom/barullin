@@ -30,7 +30,7 @@ Los knobs K1–K4 son de la página en la que estás. Cada botón recorre sus p�
 | ENV | Pad, arpegio, bajo | — | ataque (2 ms–2 s) | caída (50 ms–3 s) | sostenido (0–100 %) | release (20 ms–4 s) |
 | LFO | LFO 1, 2, 3 | sí / no | destino (ver abajo) | velocidad (0,1–10 Hz) | cantidad | forma (seno, triángulo, cuadrada, azar) |
 | EDIT | Ritmo | silencio rápido | bombo (a negras) | caja (en el 2 y el 4) | charles (a corcheas) | apertura del charles (de cerrado a abierto) |
-| GLO | Global | — | tonalidad | modo | octava | brillo del pad (ALGORITHM: encadenar acordes sí/no) |
+| GLO | Global | — | tonalidad | modo | sonido del pad: sierras, cuerdas, órgano, piano eléctrico, campana, cristal, pulso (carga su envolvente, que luego tocas en ENV) | brillo del pad (ALGORITHM: encadenar acordes sí/no) |
 | HOME | Principal | — | volumen pad | volumen bajo | volumen arpegio | volumen rasgueo |
 
 Pad, bajo, arpegio y rasgueo son capas independientes que suenan a la vez; cada una tiene su volumen en HOME. El bajo pulsado sustituye al sostenido mientras está encendido. El arpegiador y el bajo pulsado van a la misma rejilla del tempo. Van siempre con la rejilla del compás, que arranca con el primer acorde: los cambios de acorde caen en ella (CUADRAR), y si uno llega hasta 60 ms tarde, ese paso se repite con él. Con CUADRAR en AL MOMENTO, cada acorde nuevo arranca el arpegio y el bajo en el acto. Efectos y LFO vienen apagados de serie.
@@ -45,7 +45,7 @@ Los tres LFO son generales: cada uno mueve lo que le digas, y dos pueden ir al m
 | REC | Graba una idea: empieza con el primer acorde que toques; REC otra vez la cierra (a compases enteros) y la pone en bucle |
 | PLAY | Reproduce o para la idea del banco. Mientras suena, lo que toques en directo manda |
 | SEQ | Banco siguiente (8 bancos, cada uno con su idea). Si algo suena, el cambio entra al acabar el bucle |
-| OCT− / OCT+ | Octava |
+| OCT− / OCT+ | Octava (−2 a +2) |
 | SAVE | Guarda los ajustes y los 8 bancos |
 
 Los modificadores se combinan: `7` + `9` da maj9, m9 o 9 según el grado; `sus4` + `7` da 7sus4.
@@ -88,6 +88,7 @@ python3 base/tools/fm1_install.py app/build/barullin.fwsc         # instalar en 
 - [x] Reloj MIDI y start/stop
 - [x] Bajo pulsado, envolventes y tres LFO con 21 destinos
 - [x] Delay de rebote al tempo, delay libre en ms y reverb
+- [x] Siete sonidos de pad (GLO)
 - [ ] Motor de pad tipo Juno (de Barullo Xuno)
 
 ## Licencia

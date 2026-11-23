@@ -691,3 +691,26 @@ wait 25
 expect degree 4
 key 7 up
 wait 30
+# --- SONIDO (GLO, K3): cada sonido del pad, con su envolvente ---
+tap GLO
+wait 30
+expect sound 0
+turn K3 3
+wait 30
+expect sound 3
+shot sonido.png
+key 0 down
+wait 30
+key 0 up
+wav sonido_piano.wav
+wait 1500
+wavstop
+expect peak_db_min -30
+turn K3 3
+wait 30
+expect sound 6
+turn K3 -6
+wait 30
+expect sound 0
+tap HOME
+wait 30
