@@ -14,7 +14,7 @@
 #define SR 44100.0f
 
 /* ------------------------------------------------------------- ajustes --- */
-#define SET_MAGIC 0x42524C45u            /* "BRLE" */
+#define SET_MAGIC 0x42524C46u            /* "BRLF" */
 #define LOOP_MAX 64                      /* cambios de acorde en una idea */
 #define LOOP_STEPS 128                   /* 16 compases de corcheas */
 typedef struct { uint8_t step; int8_t degree; uint8_t mods; uint8_t inv; } loop_ev_t;
@@ -68,6 +68,8 @@ typedef struct {
     int8_t bp_oct;                       /* -1..+1: la octava del bajo pulsado */
     uint8_t vol_pad, vol_bass, vol_arp, vol_strum;   /* 0..VOL_MAX: el volumen de cada capa (HOME) */
     uint8_t dly_tone;                    /* 0..9: las repeticiones, de oscuras a brillantes */
+    uint8_t dly_free;                    /* el tiempo del delay: 0 a tempo, 1 libre en ms */
+    uint16_t dly_ms;                     /* libre: 10..750 ms */
     uint8_t rev_width;                   /* 0..10: ancho estéreo de la reverb */
     lfo_t lfo[3];                        /* un LFO por sonido: pad, arpegio, bajo */
     uint8_t cur_bank;                    /* el banco elegido: REC graba en él, PLAY lo toca */
@@ -181,6 +183,13 @@ static int arp_was;                      /* el arpegiador sonaba en el bloque an
  * pulsado, el reloj MIDI y las ideas grabadas van todos a esta rejilla, así que siempre caen juntos. */
 static uint32_t tp_bint;                 /* pulsos enteros */
 static float tp_bfrac;                   /* y la fracción, 0..1 */
+/* La rejilla del arpegio y del bajo pulsado: la misma velocidad que el reloj maestro, pero tocando en directo
+ * vuelve a cero con cada acorde nuevo, así que entran en el acto (y siguen juntos). Con una idea sonando o
+ * grabando no se toca: va con el reloj maestro y con el compás. */
+static uint32_t pf_bint;
+static float pf_bfrac;
+static int chord_new;                    /* take_chord: llegó un acorde distinto */
+static uint32_t arp_age, bp_age;         /* muestras desde el último paso del arpegio / del bajo */
 static volatile float tp_beats;          /* la posición para el UI: pulsos (vuelve a 0 al reiniciar) */
 static volatile uint32_t tp_resets;      /* cuántas veces se reinició (el UI lo ve) */
 static volatile uint32_t tp_reset_req;   /* el UI pide reiniciar (PLAY): distinto de tp_reset_done */
@@ -231,7 +240,7 @@ static void take_chord(const snd_chord *c)
     if (c != &achord) {
         int k, same = c->n == achord.n && c->bass == achord.bass;
         for (k = 0; same && k < c->n; k++) same = c->notes[k] == achord.notes[k];
-        if (!same) arp_restart = 1;           /* acorde nuevo: el arpegio empieza su patrón desde el principio */
+        if (!same) { arp_restart = 1; chord_new = 1; }   /* acorde nuevo: el arpegio empieza su patrón desde el principio */
         achord = *c;
     }
     for (j = 0; j < NPAD; j++) {
@@ -301,7 +310,8 @@ static float rv_fb = 0.84f, rv_tone = 0.8f;   /* del bloque: tamaño y tono */
 
 static float dly_target(void)
 {
-    float d = SR * 60.0f / (float)set.tempo * DLY_BEATS[set.dly_div % 6u];
+    float d = set.dly_free ? SR * (float)set.dly_ms / 1000.0f
+                           : SR * 60.0f / (float)set.tempo * DLY_BEATS[set.dly_div % 6u];
     return d > (float)(DLY_MAX - 2) ? (float)(DLY_MAX - 2) : d;
 }
 
@@ -572,9 +582,9 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             if (!on) arp_release(0);
             if (!bon) arp_release(1);
             /* el que se enciende espera a la siguiente línea de la rejilla: entra a tiempo con lo que ya suena */
-            if (on) arp_last = tp_bint * (uint32_t)(set.arp_div == 0 ? 2 : set.arp_div == 1 ? 3 : 4)
-                               + (uint32_t)(tp_bfrac * (float)(set.arp_div == 0 ? 2 : set.arp_div == 1 ? 3 : 4));
-            if (bon) bp_last = tp_bint * (uint32_t)(set.bp_div + 1u) + (uint32_t)(tp_bfrac * (float)(set.bp_div + 1u));
+            if (on) arp_last = pf_bint * (uint32_t)(set.arp_div == 0 ? 2 : set.arp_div == 1 ? 3 : 4)
+                               + (uint32_t)(pf_bfrac * (float)(set.arp_div == 0 ? 2 : set.arp_div == 1 ? 3 : 4));
+            if (bon) bp_last = pf_bint * (uint32_t)(set.bp_div + 1u) + (uint32_t)(pf_bfrac * (float)(set.bp_div + 1u));
         }
         if (!on || !achord.gate) {
             if (achord.gate == 0) arp_release(0);
@@ -590,9 +600,22 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             tp_reset_done = tp_reset_req;
             tp_bint = 0;
             tp_bfrac = 0.0f;
+            pf_bint = 0;
+            pf_bfrac = 0.0f;
             clk_last = arp_last = bp_last = ~0u;
             tp_resets++;
+        } else if (chord_new && achord.gate && tp_gate_was && !tp_locked) {
+            pf_bint = 0;                     /* en directo, acorde nuevo: el arpegio y el bajo, en el acto */
+            pf_bfrac = 0.0f;
+            arp_last = bp_last = ~0u;
+        } else if (chord_new && achord.gate && tp_gate_was) {
+            /* con la rejilla del compás: si el acorde llega un pelín tarde (hasta 60 ms tras un paso), ese paso
+             * se repite con el acorde nuevo */
+            if (ARP_ON && arp_age < (uint32_t)(0.06f * SR)) { arp_release(0); arp_fire(arp_step_len(), arp_last); arp_age = 0; }
+            if (set.bp_on && bp_age < (uint32_t)(0.06f * SR)) { arp_release(1); bp_fire(bp_step_len(), bp_last); bp_age = 0; }
         }
+        chord_new = 0;
+        if (tp_locked) { pf_bint = tp_bint; pf_bfrac = tp_bfrac; }   /* con una idea: la rejilla del compás */
         tp_gate_was = achord.gate;
     }
     { uint32_t pkt; int port; while (plat_midi_in(&pkt, &port)) {} }   /* (la entrada MIDI llegará más adelante) */
@@ -603,17 +626,21 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             uint32_t idx;
             tp_bfrac += binc;
             if (tp_bfrac >= 1.0f) { tp_bfrac -= 1.0f; tp_bint++; }
+            pf_bfrac += binc;
+            if (pf_bfrac >= 1.0f) { pf_bfrac -= 1.0f; pf_bint++; }
+            arp_age++;
+            bp_age++;
             idx = tp_bint * 24u + (uint32_t)(tp_bfrac * 24.0f);
             if (idx != clk_last) { clk_last = idx; if (ARP_ON || set.bp_on) midi_rt(0xF8u); }
             if (ARP_ON) {
                 uint32_t pb = ARP_PB[set.arp_div % 3u];
-                idx = tp_bint * pb + (uint32_t)(tp_bfrac * (float)pb);
-                if (idx != arp_last) { arp_last = idx; if (achord.gate) arp_fire(arp_step_len(), idx); }
+                idx = pf_bint * pb + (uint32_t)(pf_bfrac * (float)pb);
+                if (idx != arp_last) { arp_last = idx; arp_age = 0; if (achord.gate) arp_fire(arp_step_len(), idx); }
             }
             if (set.bp_on) {
                 uint32_t pb = BP_PB[set.bp_div % 4u];
-                idx = tp_bint * pb + (uint32_t)(tp_bfrac * (float)pb);
-                if (idx != bp_last) { bp_last = idx; if (achord.gate) bp_fire(bp_step_len(), idx); }
+                idx = pf_bint * pb + (uint32_t)(pf_bfrac * (float)pb);
+                if (idx != bp_last) { bp_last = idx; bp_age = 0; if (achord.gate) bp_fire(bp_step_len(), idx); }
             }
         }
         for (j = 0; j < NPAD; j++) {
@@ -742,6 +769,7 @@ static struct {
     uint8_t playing;
     float rec_acc, play_acc;             /* corcheas desde que empezó la grabación / dentro del bucle */
     uint32_t rec_sig, shown_pos;
+    uint32_t rec_resets;                 /* tp_resets al empezar a grabar */
     uint32_t stop_t;                     /* la tecla STOP bajó (0: no está pulsada, o ya actuó)
                                           * corta: para el acorde; un segundo: HOLD sí / no */
 } st;
@@ -795,6 +823,8 @@ static void settings_defaults(void)
     set.vol_arp = 0;                         /* el arpegio, callado hasta que se le sube */
     set.vol_strum = VOL_UNITY;
     set.dly_tone = 7;
+    set.dly_free = 0;
+    set.dly_ms = 300;
     set.rev_width = 10;
     {
         int k;
@@ -846,7 +876,7 @@ static void settings_load(void)
         || set.dly_on > 1u || set.rev_on > 1u || set.rev_size > 9u || set.rev_tone > 9u
         || set.env_a > 9u || set.env_d > 9u || set.env_s > 10u || set.env_r > 9u
         || set.aenv_a > 9u || set.aenv_d > 9u || set.aenv_s > 10u || set.aenv_r > 9u || set.bp_on > 1u || set.bp_div > 3u || set.bp_pat > 3u || set.bp_len < 1u || set.bp_len > 9u || set.bp_oct < -1 || set.bp_oct > 1
-        || set.vol_pad > VOL_MAX || set.vol_bass > VOL_MAX || set.vol_arp > VOL_MAX || set.vol_strum > VOL_MAX || set.dly_tone > 9u || set.rev_width > 10u
+        || set.vol_pad > VOL_MAX || set.vol_bass > VOL_MAX || set.vol_arp > VOL_MAX || set.vol_strum > VOL_MAX || set.dly_tone > 9u || set.dly_free > 1u || set.dly_ms < 10u || set.dly_ms > 750u || set.rev_width > 10u
         || !lfos_ok()
         || set.benv_a > 9u || set.benv_d > 9u || set.benv_s > 10u || set.benv_r > 9u
         || set.cur_bank >= NBANK || !banks_ok())
@@ -1107,7 +1137,9 @@ static void seq_tick(void)
     if (d < 0.0f) d = 0.0f;
     last_beats = b;
     last_resets = rs;
-    tp_locked = (uint8_t)(st.playing || st.rec == 2);   /* sonando o grabando: el reloj no se reinicia solo */
+    /* sonando o grabando: el reloj no se reinicia solo (grabando, en cuanto el audio lo puso a cero con el
+     * primer acorde) */
+    tp_locked = (uint8_t)(st.playing || (st.rec == 2 && tp_resets != st.rec_resets));
     if (st.rec == 2) st.rec_acc += d;
     if (st.playing && PLAY_LOOP.len) {
         st.play_acc += d;
@@ -1176,6 +1208,7 @@ static void seq_record(int degree, unsigned mods, int inv, int live)
     if (st.rec == 1 && live) {               /* el primer acorde que se toca: empieza */
         st.rec = 2;
         st.rec_acc = 0.0f;
+        st.rec_resets = tp_resets;           /* el reloj se pondrá a cero con este acorde (el audio lo hace) */
         REC_LOOP.n = 0;
         REC_LOOP.len = 0;
         st.rec_sig = ~0u;
@@ -1351,8 +1384,20 @@ static void input(void)
                 int_text(set.arp_len * 10, t); text_cat(t, "%");
                 set_changed("ARP LARGO", t);
             }
+        } else if (st.page == PG_DLY && k == EN_ALGO) {   /* DELAY: a tempo o libre, en ALGORITHM */
+            set.dly_free = e > 0;
+            set_changed("DELAY", set.dly_free ? "LIBRE (MS)" : "A TEMPO");
         } else if (st.page == PG_DLY && k >= EN_K1) {   /* DELAY (SEL lo enciende) */
-            if (k == EN_K1) {
+            if (k == EN_K1 && set.dly_free) {    /* libre: en ms, pasos finos abajo y más gordos arriba */
+                int32_t ms = set.dly_ms, d;
+                for (d = 0; d < (e < 0 ? -e : e); d++) {
+                    int32_t st_ = e > 0 ? (ms < 100 ? 5 : ms < 300 ? 10 : 25) : (ms <= 100 ? 5 : ms <= 300 ? 10 : 25);
+                    ms = clamp(ms + (e > 0 ? st_ : -st_), 10, 750);
+                }
+                set.dly_ms = (uint16_t)ms;
+                int_text(ms, t); text_cat(t, " MS");
+                set_changed("DELAY TIEMPO", t);
+            } else if (k == EN_K1) {
                 set.dly_div = (uint8_t)clamp((int32_t)set.dly_div + e, 0, 5);
                 set_changed("DELAY TIEMPO", DLY_DIV_NAME[set.dly_div]);
             } else if (k == EN_K2) {
@@ -1665,7 +1710,9 @@ static void draw(void)
             int_text(set.bp_oct, v[3]);
         } else if (pg == PG_DLY) {
             lbl[0] = "TIEMPO"; lbl[1] = "REPETIR"; lbl[2] = "TONO"; lbl[3] = "MEZCLA";
-            text_cat(v[0], DLY_DIV_NAME[set.dly_div]);
+            if (set.dly_free) { int_text(set.dly_ms, v[0]); text_cat(v[0], "ms"); }
+            else text_cat(v[0], DLY_DIV_NAME[set.dly_div]);
+            text_cat(head, set.dly_free ? "  LIBRE" : "  A TEMPO");
             int_text(set.dly_fb * 10, v[1]); text_cat(v[1], "%");
             int_text(set.dly_tone + 1, v[2]);
             int_text(set.dly_mix * 10, v[3]); text_cat(v[3], "%");
@@ -1757,6 +1804,7 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "vol_arp")) *got = set.vol_arp;
     else if (!strcmp(what, "arp_free")) *got = set.arp_free;
     else if (!strcmp(what, "meter")) *got = set.meter;
+    else if (!strcmp(what, "dly_ms")) *got = set.dly_free ? set.dly_ms : -1;
     else if (!strcmp(what, "page")) *got = st.page;
     else if (!strcmp(what, "rec")) *got = st.rec;
     else if (!strcmp(what, "rev")) *got = set.rev_mix;

@@ -23,14 +23,14 @@ Los knobs K1–K4 son de la página en la que estás. Cada botón recorre sus p�
 | --- | --- | --- | --- | --- | --- | --- |
 | ARP | Arpegiador | silencio rápido (a 0 y vuelta) | octavas (1–3) | modo (sube, baja, sube-baja, azar) | paso (1/8, 1/8T, 1/16) | duración (ALGORITHM: ciclo en el compás, grupos de 4, o libre) |
 | | Bajo pulsado | sí / no | paso (1/4, 1/8, 1/8T, 1/16) | patrón (nota, quinta, octava, acorde: las notas del que suena) | duración | octava (−1, 0, +1) |
-| FX | Delay | sí / no | tiempo al tempo (1/16–1/2) | repeticiones | tono de las repeticiones | mezcla |
+| FX | Delay | sí / no | tiempo: al tempo (1/16–1/2) o libre en ms (10–750 ms; ALGORITHM elige) | repeticiones | tono de las repeticiones | mezcla |
 | | Reverb | sí / no | sala | tono | ancho estéreo | mezcla |
 | ENV | Pad, arpegio, bajo | — | ataque (2 ms–2 s) | caída (50 ms–3 s) | sostenido (0–100 %) | release (20 ms–4 s) |
 | LFO | Pad, arpegio, bajo | sí / no | destino (filtro/brillo, volumen, afinar, paneo) | velocidad (0,1–10 Hz) | cantidad | forma (seno, triángulo, cuadrada, azar) |
 | GLO | Global | — | tonalidad | modo | octava | brillo del pad (ALGORITHM: encadenar acordes sí/no) |
 | HOME | Principal | — | volumen pad | volumen bajo | volumen arpegio | volumen rasgueo |
 
-Pad, bajo, arpegio y rasgueo son capas independientes que suenan a la vez; cada una tiene su volumen en HOME. El bajo pulsado sustituye al sostenido mientras está encendido. El arpegiador y el bajo pulsado van a la misma rejilla del tempo. Efectos y LFO vienen apagados de serie.
+Pad, bajo, arpegio y rasgueo son capas independientes que suenan a la vez; cada una tiene su volumen en HOME. El bajo pulsado sustituye al sostenido mientras está encendido. El arpegiador y el bajo pulsado van a la misma rejilla del tempo. Tocando en directo, cada acorde nuevo los arranca en el acto; con una idea sonando o grabando, van con la rejilla del compás (y si el acorde llega hasta 60 ms tarde, ese paso se repite con él). Efectos y LFO vienen apagados de serie.
 
 ### Más controles
 
