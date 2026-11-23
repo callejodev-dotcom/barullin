@@ -13,6 +13,7 @@ Construido sobre [fm1-base](https://github.com/charlesvestal/fm1-base) de Charle
 | Teclas negras (mantener) | `m/M` `7` `maj7` · `sus2` `sus4` · `9` `6` `dim/aug` · `INV1` `INV2` |
 | Última tecla negra | STOP: pulsación corta para el acorde; mantenida un segundo activa o quita el HOLD (activado por defecto: el acorde sigue sonando al soltar) |
 | K1 / K2 / K3 / K4 | En la página principal (HOME): volumen del pad / del bajo / del arpegio / del rasgueo, en pasos del 5 % (una vuelta, de 0 a 100 %). Todo suena a la vez: lo que no quieras, a 0. El arpegio viene a 0 y suena en cuanto le subes el volumen |
+| ALGORITHM (en HOME) | CUADRAR: con algo sonando, el acorde nuevo espera a la siguiente corchea, negra (de serie) o compás, y entra justo en la línea; así el ritmo y el arpegio nunca se cortan. Si lo pulsas un pelín tarde (hasta 60 ms), entra en el acto. AL MOMENTO: cambia nada más pulsar |
 | PRESET | Tipo de compás: 4/4, 3/4, 6/8, 5/4, 7/8. Agrupa el arpegio (4/4: 4+4; 3/4 y 6/8: 3+3; 5/4: 4+3+3; 7/8: 4+3), cierra las ideas a compases enteros y cuenta PLAY en él |
 
 ### Páginas
@@ -32,7 +33,7 @@ Los knobs K1–K4 son de la página en la que estás. Cada botón recorre sus p�
 | GLO | Global | — | tonalidad | modo | octava | brillo del pad (ALGORITHM: encadenar acordes sí/no) |
 | HOME | Principal | — | volumen pad | volumen bajo | volumen arpegio | volumen rasgueo |
 
-Pad, bajo, arpegio y rasgueo son capas independientes que suenan a la vez; cada una tiene su volumen en HOME. El bajo pulsado sustituye al sostenido mientras está encendido. El arpegiador y el bajo pulsado van a la misma rejilla del tempo. Tocando en directo, cada acorde nuevo los arranca en el acto; con una idea sonando o grabando, van con la rejilla del compás (y si el acorde llega hasta 60 ms tarde, ese paso se repite con él). Efectos y LFO vienen apagados de serie.
+Pad, bajo, arpegio y rasgueo son capas independientes que suenan a la vez; cada una tiene su volumen en HOME. El bajo pulsado sustituye al sostenido mientras está encendido. El arpegiador y el bajo pulsado van a la misma rejilla del tempo. Van siempre con la rejilla del compás, que arranca con el primer acorde: los cambios de acorde caen en ella (CUADRAR), y si uno llega hasta 60 ms tarde, ese paso se repite con él. Con CUADRAR en AL MOMENTO, cada acorde nuevo arranca el arpegio y el bajo en el acto. Efectos y LFO vienen apagados de serie.
 
 Los tres LFO son generales: cada uno mueve lo que le digas, y dos pueden ir al mismo sitio. Destinos: pad (filtro, volumen, afinación, paneo, desafine), arpegio (volumen, afinación, paneo, brillo, largo de las notas), bajo (volumen, afinación, brillo, largo), delay (mezcla, tiempo: efecto cinta), delay libre (tiempo), reverb (mezcla), ritmo (volumen, charles) y volumen total.
 

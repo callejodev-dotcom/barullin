@@ -2,6 +2,11 @@
 #   app/build/host/barullin_host app/tests/basic.txt app/build/host
 wait 600
 shot boot.png
+# CUADRAR viene a negras; casi todo el guion cambia de acorde al momento (se prueba al final)
+expect quant 2
+turn ALGO -2
+wait 30
+expect quant 0
 # los efectos, apagados de serie
 expect dly_on 0
 expect rev_on 0
@@ -650,4 +655,34 @@ turn K1 -16
 turn K2 -16
 tap SEL
 tap HOME
+wait 30
+# --- CUADRAR (HOME, ALGORITHM): con algo sonando, el acorde nuevo espera a la siguiente negra ---
+turn ALGO 2
+wait 30
+expect quant 2
+shot cuadrar.png
+key 25 down
+wait 30
+key 25 up
+wait 100
+# a 100 BPM la negra dura 600 ms; el reloj arranca con el primer acorde
+key 0 down
+wait 50
+key 0 up
+wait 250
+key 6 down
+wait 30
+expect degree 0
+expect q_pend 1
+wait 160
+expect degree 0
+wait 120
+expect degree 3
+key 6 up
+# pulsado justo tras la línea (hasta 60 ms): entra en el acto
+wait 610
+key 7 down
+wait 25
+expect degree 4
+key 7 up
 wait 30

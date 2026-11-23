@@ -14,7 +14,7 @@
 #define SR 44100.0f
 
 /* ------------------------------------------------------------- ajustes --- */
-#define SET_MAGIC 0x42524C48u            /* "BRLH" */
+#define SET_MAGIC 0x42524C49u            /* "BRLI" */
 #define LOOP_MAX 64                      /* cambios de acorde en una idea */
 #define LOOP_STEPS 128                   /* 16 compases de corcheas */
 typedef struct { uint8_t step; int8_t degree; uint8_t mods; uint8_t inv; } loop_ev_t;
@@ -50,6 +50,7 @@ typedef struct {
     int8_t octave;                       /* -2 .. +2 */
     uint8_t bright;                      /* 0..20: el corte del filtro del pad */
     uint8_t lead;                        /* voice leading */
+    uint8_t quant;                       /* cuadrar los cambios de acorde: 0 al momento, 1 corchea, 2 negra, 3 compás */
     uint8_t hold;                        /* el acorde sigue al soltar (por defecto, sí) */
     uint8_t arp_free;                    /* ciclo del arpegio: 0 en el compás (grupos de 4), 1 libre */
     uint8_t meter;                       /* tipo de compás (PRESET): 4/4, 3/4, 6/8, 5/4, 7/8 */
@@ -727,7 +728,7 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             pf_bfrac = 0.0f;
             clk_last = arp_last = bp_last = drum_last = ~0u;
             tp_resets++;
-        } else if (chord_new && achord.gate && tp_gate_was && !tp_locked) {
+        } else if (chord_new && achord.gate && tp_gate_was && !tp_locked && !set.quant) {
             pf_bint = 0;                     /* en directo, acorde nuevo: el arpegio y el bajo, en el acto */
             pf_bfrac = 0.0f;
             arp_last = bp_last = drum_last = ~0u;
@@ -738,7 +739,7 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             if (set.bp_on && bp_age < (uint32_t)(0.06f * SR)) { arp_release(1); bp_fire(bp_step_len(), bp_last); bp_age = 0; }
         }
         chord_new = 0;
-        if (tp_locked) { pf_bint = tp_bint; pf_bfrac = tp_bfrac; }   /* con una idea: la rejilla del compás */
+        if (tp_locked || set.quant) { pf_bint = tp_bint; pf_bfrac = tp_bfrac; }   /* con una idea, o cuadrando: la rejilla del compás */
         tp_gate_was = achord.gate;
     }
     { uint32_t pkt; int port; while (plat_midi_in(&pkt, &port)) {} }   /* (la entrada MIDI llegará más adelante) */
@@ -923,6 +924,11 @@ static struct {
     uint32_t keys, btn;
     uint8_t redraw;
     uint8_t gate_hold_off;
+    uint8_t q_pend;                      /* un acorde nuevo espera a su línea de la rejilla (CUADRAR) */
+    uint32_t q_sig, q_resets;
+    int8_t q_deg;                        /* el acorde que espera (sigue esperando aunque se suelte la tecla) */
+    uint8_t q_mods, q_inv;
+    float q_due;                         /* en pulsos del reloj maestro */
     uint8_t mem_arp, mem_fx, mem_env, mem_lfo, mem_glo, mem_drum;   /* la última página de cada botón: se vuelve a ella */
     uint32_t leds;                       /* los botones iluminados (para las pruebas) */
     uint8_t page;                        /* de quién son K1..K4: 0 acorde, 1 arpegiador, 2 delay, 3 reverb,
@@ -952,6 +958,7 @@ static void settings_defaults(void)
     set.octave = 0;
     set.bright = 10;
     set.lead = 1;
+    set.quant = 2;
     set.hold = 1;
     set.arp_mute_vol = VOL_UNITY;
     set.arp_free = 0;
@@ -1038,7 +1045,7 @@ static void settings_load(void)
 {
     if (plat_store_load(OBJ_SETTINGS, &set, sizeof set) != (int)sizeof set || set.magic != SET_MAGIC
         || set.key > 11u || set.mode >= BL_MODE_COUNT || set.octave < -2 || set.octave > 2
-        || set.bright > 20u || set.lead > 1u || set.hold > 1u
+        || set.bright > 20u || set.lead > 1u || set.quant > 3u || set.hold > 1u
         || set.arp_mute_vol > VOL_MAX || set.arp_free > 1u || set.meter >= NMETER || set.arp_mode > 3u || set.arp_div > 2u || set.arp_oct < 1u || set.arp_oct > 3u
         || set.arp_len < 1u || set.arp_len > 9u || set.tempo < 40u || set.tempo > 220u
         || set.dly_mix > 10u || set.dly_div > 5u || set.dly_fb > 9u || set.rev_mix > 10u
@@ -1407,11 +1414,43 @@ static void seq_record(int degree, unsigned mods, int inv, int live)
     }
 }
 
+/* CUADRAR: con algo sonando, un acorde nuevo espera a la siguiente corchea, negra o compás del reloj, y
+ * entra un pelín antes (20 ms) para que el paso del arpegio ya lo coja. Si se pulsa justo después de la
+ * línea (hasta 60 ms), entra en el acto: ese paso se repite con él. Devuelve 1 mientras lo retiene. */
+static const char *const QUANT_NAME[4] = {"AL MOMENTO", "CORCHEA", "NEGRA", "COMPAS"};
+static int quant_hold(int *degree, unsigned *mods, int *inv)
+{
+    float q, b = tp_beats, bps = (float)set.tempo / 60.0f;
+    uint32_t sig;
+    if (!set.quant || !st.gate || *degree < 0
+        || (*degree == st.degree && *mods == st.mods && *inv == st.inv)) {
+        st.q_pend = 0;
+        return 0;
+    }
+    q = set.quant == 1 ? 0.5f : set.quant == 2 ? 1.0f : (float)MT->bar8 * 0.5f;
+    sig = (uint32_t)(*degree + 1) | *mods << 4 | (uint32_t)*inv << 12;
+    if (!st.q_pend || sig != st.q_sig || tp_resets != st.q_resets) {
+        float last = fm_floorf(b / q) * q;
+        st.q_pend = 1;
+        st.q_sig = sig;
+        st.q_resets = tp_resets;
+        st.q_due = b - last < 0.060f * bps ? b : last + q;
+    }
+    st.q_deg = (int8_t)*degree;
+    st.q_mods = (uint8_t)*mods;
+    st.q_inv = (uint8_t)*inv;
+    if (b + 0.020f * bps >= st.q_due) { st.q_pend = 0; return 0; }
+    *degree = st.degree;
+    *mods = st.mods;
+    *inv = st.inv;
+    return 1;
+}
+
 static void input(void)
 {
     uint32_t keys, btn = plat_buttons(), k;
     unsigned mods = 0;
-    int inv = 0, degree = -1, live_degree, i;
+    int inv = 0, degree = -1, live_degree, i, from_seq = 0, held = 0;
     int32_t e;
     touch_poll();
     keys = touch_keys();
@@ -1453,13 +1492,17 @@ static void input(void)
     if (st.playing && degree < 0 && !mods && !inv) {   /* la idea suena: lo grabado, salvo lo que se toque */
         seq_current(&degree, &mods, &inv);
         st.gate_hold_off = 0;
+        from_seq = 1;
     } else if (st.gate_hold_off) {                /* parado: hasta el siguiente grado */
         if (degree >= 0) st.gate_hold_off = 0;
     } else if (degree < 0 && set.hold && st.gate) {   /* HOLD: el acorde sigue; los modificadores aún lo cambian */
-        degree = st.degree;
-        if (!mods) mods = st.mods;
+        degree = st.q_pend ? st.q_deg : st.degree;   /* (o el que espera a su línea, aunque ya se soltara) */
+        if (!mods) mods = st.q_pend ? st.q_mods : st.mods;
+        if (st.q_pend && !inv) inv = st.q_inv;
     }
-    seq_record(degree, mods, inv, live_degree >= 0);
+    if (!from_seq) held = quant_hold(&degree, &mods, &inv);
+    else st.q_pend = 0;
+    seq_record(degree, mods, inv, live_degree >= 0 && !held);
     chord_update(degree, mods, inv);
 
     /* rasgueo */
@@ -1715,6 +1758,9 @@ static void input(void)
                 int_text(set.bright * 5, t);
                 set_changed("BRILLO", t);
             }
+        } else if (st.page == PG_MAIN && k == EN_ALGO) {   /* HOME: cuadrar los cambios de acorde */
+            set.quant = (uint8_t)clamp((int32_t)set.quant + e, 0, 3);
+            set_changed("CUADRAR", QUANT_NAME[set.quant]);
         } else if (k >= EN_K1) {             /* HOME: el volumen de cada capa */
             static const char *const NAME[4] = {"VOLUMEN PAD", "VOLUMEN BAJO", "VOLUMEN ARP", "VOLUMEN RASGUEO"};
             uint8_t *vol = k == EN_K1 ? &set.vol_pad : k == EN_K2 ? &set.vol_bass : k == EN_K3 ? &set.vol_arp : &set.vol_strum;
@@ -1967,6 +2013,11 @@ static void draw(void)
         int_text(set.vol_bass * 100 / VOL_MAX, v[1]); text_cat(v[1], "%");
         int_text(set.vol_arp * 100 / VOL_MAX, v[2]); text_cat(v[2], "%");
         int_text(set.vol_strum * 100 / VOL_MAX, v[3]); text_cat(v[3], "%");
+        {
+            char q[24] = "CUADRAR ";
+            text_cat(q, QUANT_NAME[set.quant]);
+            cv_text(4, 50, &FONT_XS, q, set.quant ? C_AMB : C_GRAY);
+        }
         for (i = 0; i < 4; i++) {
             cv_text(4 + i * 60, 68, &FONT_XS, LBL[i], C_GRAY);
             cv_text(4 + i * 60, 81, &FONT_XS, v[i], C_HI);
@@ -2021,6 +2072,8 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "drm_kick")) *got = set.drm_kick;
     else if (!strcmp(what, "drum_hits")) *got = drum_hits >= 4u;
     else if (!strcmp(what, "d2_ms")) *got = set.d2_ms;
+    else if (!strcmp(what, "quant")) *got = set.quant;
+    else if (!strcmp(what, "q_pend")) *got = st.q_pend;
     else if (!strcmp(what, "d2_on")) *got = set.d2_on;
     else if (!strcmp(what, "page")) *got = st.page;
     else if (!strcmp(what, "rec")) *got = st.rec;
