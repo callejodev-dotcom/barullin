@@ -1693,12 +1693,12 @@ static const char *bt_word(int s)
     case PLAT_BTA_SCANNING: return "BUSCANDO";
     case PLAT_BTA_FOUND: return "ELIGE UNO";
     case PLAT_BTA_NONE: return "NO HAY NADA";
-    case PLAT_BTA_PAGING: return "LLAMANDO";
+    case PLAT_BTA_PAGING: return "LLAMANDO, ESPERA";
     case PLAT_BTA_LINKED: case PLAT_BTA_SETUP: return "CONECTANDO";
     case PLAT_BTA_STREAMING: return "SONANDO";
     case PLAT_BTA_REFUSED: return "NO QUISO";
     case PLAT_BTA_NO_LAST: return "SIN ANTERIOR";
-    case PLAT_BTA_FAILED: return "FALLO";
+    case PLAT_BTA_FAILED: return "NO CONTESTA";
     case PLAT_BTA_READY: return "LISTO";
     default: return "APAGADO";
     }
