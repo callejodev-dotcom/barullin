@@ -511,9 +511,10 @@ tap HOME
 wait 30
 # --- HOME: el volumen de cada capa; el pad a 0 se calla aunque suene ---
 expect page 0
-expect vol_pad 8
-expect vol_bass 6
-turn K1 -8
+expect vol_pad 16
+expect vol_bass 12
+expect vol_arp 0
+turn K1 -16
 wait 30
 expect vol_pad 0
 shot home.png
@@ -523,7 +524,19 @@ key 0 up
 wav pad0.wav
 wait 600
 wavstop
-turn K1 8
+turn K1 16
 wait 30
-expect vol_pad 8
+expect vol_pad 16
+# el arpegio suena en cuanto se le sube el volumen, sin encenderlo
+expect arp 0
+turn K3 6
+wait 400
+expect vol_arp 6
+expect arp 1
+expect high_on 1
+shot home_arp.png
+turn K3 -6
+wait 400
+expect arp 0
+expect high_on 0
 

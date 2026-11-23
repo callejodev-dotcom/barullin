@@ -14,7 +14,7 @@
 #define SR 44100.0f
 
 /* ------------------------------------------------------------- ajustes --- */
-#define SET_MAGIC 0x42524C40u            /* "BRL@" */
+#define SET_MAGIC 0x42524C41u            /* "BRLA" */
 #define LOOP_MAX 64                      /* cambios de acorde en una idea */
 #define LOOP_STEPS 128                   /* 16 compases de corcheas */
 typedef struct { uint8_t step; int8_t degree; uint8_t mods; uint8_t inv; } loop_ev_t;
@@ -26,6 +26,9 @@ typedef struct {
     uint8_t shape;                       /* 0 seno, 1 triángulo, 2 cuadrada, 3 azar */
 } lfo_t;
 enum { LFO_PAD, LFO_ARP, LFO_BASS };
+#define VOL_MAX 20                       /* pasos de volumen: una vuelta de knob (20 clics) va de 0 a 100 % */
+#define VOL_UNITY 16                     /* el nivel de antes (80 %) */
+#define ARP_ON (set.vol_arp != 0)        /* el arpegio suena en cuanto tiene volumen */
 #define NBANK 8                          /* bancos de ideas (SEQ pasa de uno a otro) */
 typedef struct {
     uint8_t len;                         /* corcheas (0: vacío), compases enteros */
@@ -40,7 +43,7 @@ typedef struct {
     uint8_t bright;                      /* 0..20: el corte del filtro del pad */
     uint8_t lead;                        /* voice leading */
     uint8_t hold;                        /* el acorde sigue al soltar (por defecto, sí) */
-    uint8_t arp;                         /* arpegiador encendido (SEL) */
+    uint8_t arp_mute_vol;                /* el volumen que tenía el arpegio antes de silenciarlo con SEL */
     uint8_t arp_mode;                    /* 0 sube, 1 baja, 2 sube-baja, 3 azar */
     uint8_t arp_div;                     /* 0 corcheas, 1 tresillos, 2 semicorcheas */
     uint8_t arp_oct;                     /* 1..3 octavas */
@@ -61,7 +64,7 @@ typedef struct {
     uint8_t bp_pat;                      /* 0 la nota, 1 octavas, 2 quinta */
     uint8_t bp_len;                      /* 1..9: duración de cada nota, en décimas del paso */
     int8_t bp_oct;                       /* -1..+1: la octava del bajo pulsado */
-    uint8_t vol_pad, vol_bass, vol_arp, vol_strum;   /* 0..10: el volumen de cada capa (HOME) */
+    uint8_t vol_pad, vol_bass, vol_arp, vol_strum;   /* 0..VOL_MAX: el volumen de cada capa (HOME) */
     uint8_t dly_tone;                    /* 0..9: las repeticiones, de oscuras a brillantes */
     uint8_t rev_width;                   /* 0..10: ancho estéreo de la reverb */
     lfo_t lfo[3];                        /* un LFO por sonido: pad, arpegio, bajo */
@@ -428,8 +431,8 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     float binc = (float)set.tempo / 60.0f / SR;   /* pulsos por muestra */
     float dtone = 0.15f + (float)set.dly_tone * 0.094f, rwid = (float)set.rev_width / 10.0f;
     /* los volúmenes de HOME: 8 es el nivel de antes (el bajo, de serie en 6: tapaba al pad) */
-    float g_pad = 0.11f * (float)set.vol_pad / 8.0f, g_bass = (float)set.vol_bass / 8.0f;
-    float g_arp = (float)set.vol_arp / 8.0f, g_strum = (float)set.vol_strum / 8.0f;
+    float g_pad = 0.11f * (float)set.vol_pad / VOL_UNITY, g_bass = (float)set.vol_bass / VOL_UNITY;
+    float g_arp = (float)set.vol_arp / VOL_UNITY, g_strum = (float)set.vol_strum / VOL_UNITY;
     rv_fb = 0.70f + (float)set.rev_size * 0.024f;
     rv_tone = 0.25f + (float)set.rev_tone * 0.08f;
     {   /* la envolvente, una vez por bloque */
@@ -452,10 +455,10 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     }
     take_plucks();
     {   /* el arpegiador encendido o apagado: el pad entra o sale, el reloj MIDI arranca o para */
-        int on = set.arp != 0, bon = set.bp_on != 0;
+        int on = ARP_ON, bon = set.bp_on != 0;
         int run = on || bon, ran = arp_was != 0 || bp_was;   /* algo va al tempo: reloj MIDI */
-        if (set.arp != arp_was || bon != bp_was) {   /* el pad y el bajo entran o salen */
-            arp_was = set.arp;
+        if (on != arp_was || bon != bp_was) {  /* el arpegio o el bajo pulsado entran o salen */
+            arp_was = on;
             bp_was = bon;
             take_chord(&achord);
             if (run && !ran) midi_rt(0xFAu);
@@ -495,8 +498,8 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             tp_bfrac += binc;
             if (tp_bfrac >= 1.0f) { tp_bfrac -= 1.0f; tp_bint++; }
             idx = tp_bint * 24u + (uint32_t)(tp_bfrac * 24.0f);
-            if (idx != clk_last) { clk_last = idx; if (set.arp || set.bp_on) midi_rt(0xF8u); }
-            if (set.arp) {
+            if (idx != clk_last) { clk_last = idx; if (ARP_ON || set.bp_on) midi_rt(0xF8u); }
+            if (ARP_ON) {
                 uint32_t pb = ARP_PB[set.arp_div % 3u];
                 idx = tp_bint * pb + (uint32_t)(tp_bfrac * (float)pb);
                 if (idx != arp_last) { arp_last = idx; if (achord.gate) arp_fire(arp_step_len()); }
@@ -652,7 +655,7 @@ static void settings_defaults(void)
     set.bright = 10;
     set.lead = 1;
     set.hold = 1;
-    set.arp = 0;
+    set.arp_mute_vol = VOL_UNITY;
     set.arp_mode = 0;
     set.arp_div = 0;
     set.arp_oct = 1;
@@ -679,10 +682,10 @@ static void settings_defaults(void)
     set.bp_pat = 0;
     set.bp_len = 5;
     set.bp_oct = 0;
-    set.vol_pad = 8;
-    set.vol_bass = 6;
-    set.vol_arp = 8;
-    set.vol_strum = 8;
+    set.vol_pad = VOL_UNITY;
+    set.vol_bass = 12;                       /* 60 %: tapaba al pad */
+    set.vol_arp = 0;                         /* el arpegio, callado hasta que se le sube */
+    set.vol_strum = VOL_UNITY;
     set.dly_tone = 7;
     set.rev_width = 10;
     {
@@ -729,13 +732,13 @@ static void settings_load(void)
     if (plat_store_load(OBJ_SETTINGS, &set, sizeof set) != (int)sizeof set || set.magic != SET_MAGIC
         || set.key > 11u || set.mode >= BL_MODE_COUNT || set.octave < -2 || set.octave > 2
         || set.bright > 20u || set.lead > 1u || set.hold > 1u
-        || set.arp > 1u || set.arp_mode > 3u || set.arp_div > 2u || set.arp_oct < 1u || set.arp_oct > 3u
+        || set.arp_mute_vol > VOL_MAX || set.arp_mode > 3u || set.arp_div > 2u || set.arp_oct < 1u || set.arp_oct > 3u
         || set.arp_len < 1u || set.arp_len > 9u || set.tempo < 40u || set.tempo > 220u
         || set.dly_mix > 10u || set.dly_div > 5u || set.dly_fb > 9u || set.rev_mix > 10u
         || set.dly_on > 1u || set.rev_on > 1u || set.rev_size > 9u || set.rev_tone > 9u
         || set.env_a > 9u || set.env_d > 9u || set.env_s > 10u || set.env_r > 9u
         || set.aenv_a > 9u || set.aenv_d > 9u || set.aenv_s > 10u || set.aenv_r > 9u || set.bp_on > 1u || set.bp_div > 3u || set.bp_pat > 2u || set.bp_len < 1u || set.bp_len > 9u || set.bp_oct < -1 || set.bp_oct > 1
-        || set.vol_pad > 10u || set.vol_bass > 10u || set.vol_arp > 10u || set.vol_strum > 10u || set.dly_tone > 9u || set.rev_width > 10u
+        || set.vol_pad > VOL_MAX || set.vol_bass > VOL_MAX || set.vol_arp > VOL_MAX || set.vol_strum > VOL_MAX || set.dly_tone > 9u || set.rev_width > 10u
         || !lfos_ok()
         || set.benv_a > 9u || set.benv_d > 9u || set.benv_s > 10u || set.benv_r > 9u
         || set.cur_bank >= NBANK || !banks_ok())
@@ -911,7 +914,7 @@ static void set_changed(const char *a, const char *b)
 static const char *page_state(int pg)    /* lo que se dice al entrar: si está encendido */
 {
     switch (pg) {
-    case PG_ARP: return set.arp ? "SI" : "NO";
+    case PG_ARP: return ARP_ON ? "SI" : "NO";
     case PG_BP: return set.bp_on ? "SI" : "NO";
     case PG_DLY: return set.dly_on ? "SI" : "NO";
     case PG_REV: return set.rev_on ? "SI" : "NO";
@@ -925,7 +928,7 @@ static const char *page_state(int pg)    /* lo que se dice al entrar: si está e
 static int page_active(int pg)
 {
     switch (pg) {
-    case PG_ARP: return set.arp != 0;
+    case PG_ARP: return ARP_ON;
     case PG_BP: return set.bp_on != 0;
     case PG_DLY: return set.dly_on != 0;
     case PG_REV: return set.rev_on != 0;
@@ -939,7 +942,10 @@ static void sel_toggle(void)
 {
     int pg = st.page;
     switch (pg) {
-    case PG_ARP: set.arp = !set.arp; break;
+    case PG_ARP:                             /* silencio rápido: a 0, y vuelta al volumen que tenía */
+        if (ARP_ON) { set.arp_mute_vol = set.vol_arp; set.vol_arp = 0; }
+        else set.vol_arp = set.arp_mute_vol ? set.arp_mute_vol : VOL_UNITY;
+        break;
     case PG_BP: set.bp_on = !set.bp_on; break;
     case PG_DLY:
         if (!set.dly_on) {                   /* sin ecos viejos al volver */
@@ -1351,8 +1357,8 @@ static void input(void)
         } else if (k >= EN_K1) {             /* HOME: el volumen de cada capa */
             static const char *const NAME[4] = {"VOLUMEN PAD", "VOLUMEN BAJO", "VOLUMEN ARP", "VOLUMEN RASGUEO"};
             uint8_t *vol = k == EN_K1 ? &set.vol_pad : k == EN_K2 ? &set.vol_bass : k == EN_K3 ? &set.vol_arp : &set.vol_strum;
-            *vol = (uint8_t)clamp((int32_t)*vol + e, 0, 10);
-            int_text(*vol * 10, t); text_cat(t, "%");
+            *vol = (uint8_t)clamp((int32_t)*vol + e, 0, VOL_MAX);
+            int_text(*vol * 100 / VOL_MAX, t); text_cat(t, "%");
             set_changed(NAME[k - EN_K1], t);
         } else if (k == EN_PRESET) {
             set.lead ^= 1u;
@@ -1366,7 +1372,7 @@ static void input(void)
     plat_glow(1);
     {
         /* cada botón, encendido mientras algo de su sección suena, o mientras se está en una de sus páginas */
-        int arp_on = set.arp || set.bp_on, fx_on = set.dly_on || set.rev_on;
+        int arp_on = ARP_ON || set.bp_on, fx_on = set.dly_on || set.rev_on;
         int lfo_on = set.lfo[0].on || set.lfo[1].on || set.lfo[2].on;
         uint32_t lit = btn | (set_dirty ? 1u << B_SAVE : 0u)
                        | (arp_on || st.page == PG_ARP || st.page == PG_BP ? 1u << B_ARP : 0u)
@@ -1437,9 +1443,9 @@ static void draw(void)
                 cv_rect(x, y, 9, 9, fill);
             }
         }
-        if (set.arp || set.bp_on) {          /* el arpegiador, el bajo pulsado y el tempo, a la derecha */
+        if (ARP_ON || set.bp_on) {           /* el arpegiador, el bajo pulsado y el tempo, a la derecha */
             char b[24] = "", n[8];
-            if (set.arp) text_cat(b, "ARP ");
+            if (ARP_ON) text_cat(b, "ARP ");
             if (set.bp_on) text_cat(b, "BAJO ");
             int_text(set.tempo, n);
             text_cat(b, n);
@@ -1577,10 +1583,10 @@ static void draw(void)
     } else {
         static const char *const LBL[4] = {"PAD", "BAJO", "ARPEGIO", "RASGUEO"};   /* los volúmenes */
         char v[4][12];
-        int_text(set.vol_pad * 10, v[0]); text_cat(v[0], "%");
-        int_text(set.vol_bass * 10, v[1]); text_cat(v[1], "%");
-        int_text(set.vol_arp * 10, v[2]); text_cat(v[2], "%");
-        int_text(set.vol_strum * 10, v[3]); text_cat(v[3], "%");
+        int_text(set.vol_pad * 100 / VOL_MAX, v[0]); text_cat(v[0], "%");
+        int_text(set.vol_bass * 100 / VOL_MAX, v[1]); text_cat(v[1], "%");
+        int_text(set.vol_arp * 100 / VOL_MAX, v[2]); text_cat(v[2], "%");
+        int_text(set.vol_strum * 100 / VOL_MAX, v[3]); text_cat(v[3], "%");
         for (i = 0; i < 4; i++) {
             cv_text(4 + i * 60, 68, &FONT_XS, LBL[i], C_GRAY);
             cv_text(4 + i * 60, 81, &FONT_XS, v[i], C_HI);
@@ -1628,7 +1634,8 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "mode")) *got = set.mode;
     else if (!strcmp(what, "hold")) *got = set.hold;
     else if (!strcmp(what, "dirty")) *got = set_dirty;
-    else if (!strcmp(what, "arp")) *got = set.arp;
+    else if (!strcmp(what, "arp")) *got = ARP_ON;
+    else if (!strcmp(what, "vol_arp")) *got = set.vol_arp;
     else if (!strcmp(what, "page")) *got = st.page;
     else if (!strcmp(what, "rec")) *got = st.rec;
     else if (!strcmp(what, "rev")) *got = set.rev_mix;

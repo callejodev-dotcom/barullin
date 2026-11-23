@@ -12,7 +12,7 @@ Construido sobre [fm1-base](https://github.com/charlesvestal/fm1-base) de Charle
 | Teclas blancas 8–16 | Placa de rasgueo: cada tecla, una nota del acorde, de grave a agudo |
 | Teclas negras (mantener) | `m/M` `7` `maj7` · `sus2` `sus4` · `9` `6` `dim/aug` · `INV1` `INV2` |
 | Última tecla negra | STOP: pulsación corta para el acorde; mantenida un segundo activa o quita el HOLD (activado por defecto: el acorde sigue sonando al soltar) |
-| K1 / K2 / K3 / K4 | En la página principal (HOME): volumen del pad / del bajo / del arpegio / del rasgueo. Todo suena a la vez: lo que no quieras, a 0 |
+| K1 / K2 / K3 / K4 | En la página principal (HOME): volumen del pad / del bajo / del arpegio / del rasgueo, en pasos del 5 % (una vuelta, de 0 a 100 %). Todo suena a la vez: lo que no quieras, a 0. El arpegio viene a 0 y suena en cuanto le subes el volumen |
 | PRESET | Encadenar acordes (voice leading) sí o no |
 
 ### Páginas
@@ -21,7 +21,7 @@ Los knobs K1–K4 son de la página en la que estás. Cada botón recorre sus p�
 
 | Botón | Página | SEL | K1 | K2 | K3 | K4 |
 | --- | --- | --- | --- | --- | --- | --- |
-| ARP | Arpegiador | sí / no | octavas (1–3) | modo (sube, baja, sube-baja, azar) | paso (1/8, 1/8T, 1/16) | duración |
+| ARP | Arpegiador | silencio rápido (a 0 y vuelta) | octavas (1–3) | modo (sube, baja, sube-baja, azar) | paso (1/8, 1/8T, 1/16) | duración |
 | | Bajo pulsado | sí / no | paso (1/4, 1/8, 1/8T, 1/16) | patrón (nota, octavas, quinta) | duración | octava (−1, 0, +1) |
 | FX | Delay | sí / no | tiempo al tempo (1/16–1/2) | repeticiones | mezcla | tono de las repeticiones |
 | | Reverb | sí / no | sala | tono | mezcla | ancho estéreo |
