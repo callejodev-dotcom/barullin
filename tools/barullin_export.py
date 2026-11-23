@@ -11,8 +11,9 @@ Lo que sale, en la carpeta:
     Barullin.barullin        la copia de seguridad (la misma que base/tools/fm1_backup.py restore devuelve al FM-1)
     Idea 1 - ... .mid        cada idea en su MIDI (tipo 1): ACORDES, BAJO, ARPEGIO y BATERIA, cada uno en su pista y su
                              canal (2, 3, 4 y 10, como los manda Barullín), con su tempo y su compás
-    Barullin Project/Barullin.als   el proyecto de Ableton Live (12): una pista por parte y una escena por idea, con su
-                             tempo y su compás. Las pistas van sin instrumento: arrastra el que quieras a cada una.
+    Idea N - ... Project/    un proyecto de Ableton Live (12) por idea: una pista por parte, la idea en la primera
+                             escena, con su tempo y su compás. Las pistas van sin instrumento: arrastra el que quieras.
+                             (--todas: además, uno con todas, una escena por idea)
 
 Lo que se calcula es lo que toca el FM-1 con PLAY: los acordes (con el mismo motor de acordes, app/core/chords.c,
 compilado aquí con el compilador del ordenador), el bajo (sostenido o pulsado), el arpegiador y el ritmo, con los
@@ -498,6 +499,7 @@ def main():
     ap.add_argument("--salida", default="Barullin Export")
     ap.add_argument("--vueltas", type=int, default=1, help="cuántas veces se repite cada idea en el MIDI")
     ap.add_argument("--port")
+    ap.add_argument("--todas", action="store_true", help="además, un proyecto con todas las ideas (una escena cada una)")
     ap.add_argument("--diagnostico", action="store_true", help="cuatro proyectos de prueba, para ver qué no le gusta a Live")
     ap.add_argument("--plantilla", help="un Live Set vacío guardado con tu Ableton (con una pista MIDI), de molde")
     a = ap.parse_args()
@@ -528,13 +530,22 @@ def main():
         print(f"  {title}.mid  ({b1:g} pulsos, " + ", ".join(k.lower() for k, v in parts.items() if v) + ")")
     if not any(out):
         raise SystemExit("no hay ideas guardadas (graba con REC y guarda con SAVE)")
-    als = os.path.join(a.salida, "Barullin Project", "Barullin.als")
-    write_als(als, out, a.plantilla)
+    # un proyecto de Ableton por idea: su carpeta, su tempo y su compás, sus pistas (y la idea en la primera escena)
+    for x in out:
+        if not x:
+            continue
+        als = os.path.join(a.salida, x[0] + " Project", x[0] + ".als")
+        write_als(als, [x], a.plantilla)
+        print(f"  {als}")
+    if a.todas:
+        als = os.path.join(a.salida, "Todas Project", "Todas.als")
+        write_als(als, out, a.plantilla)
+        print(f"  {als}  (todas juntas: una escena por idea)")
     if a.diagnostico:
         for st, nm in ((1, "1 plantilla tal cual"), (2, "2 pistas sin clips"), (3, "3 un clip"), (4, "4 todo")):
             write_als(os.path.join(a.salida, "Diagnostico", nm, nm + ".als"), out, a.plantilla, st)
         print("  " + os.path.join(a.salida, "Diagnostico") + ": ábrelos en orden y dime el primero que tumba Live")
-    print(f"  {als}  (una escena por idea; arrastra un instrumento a cada pista)")
+    print("  (en Ableton, arrastra un instrumento a cada pista)")
     print("hecho: " + os.path.abspath(a.salida))
 
 
