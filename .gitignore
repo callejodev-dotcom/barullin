@@ -5,3 +5,4 @@ app/web/
 
 .plantilla_ableton
 Barullin Export/
+__pycache__/
