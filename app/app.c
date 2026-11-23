@@ -133,7 +133,17 @@ static float lp1[2], lp2[2], gain_now;
 static uint32_t snd_seen, plq_r, plk_next;
 static snd_chord achord;                 /* el acorde según el audio (para el arpegio) */
 static int arp_was;                      /* el arpegiador sonaba en el bloque anterior */
-static float arp_cnt, clk_cnt;           /* muestras hasta el siguiente paso / pulso de reloj MIDI */
+/* El reloj maestro: pulsos (negras) y su fracción, contados en el audio a la muestra. El arpegio, el bajo
+ * pulsado, el reloj MIDI y las ideas grabadas van todos a esta rejilla, así que siempre caen juntos. */
+static uint32_t tp_bint;                 /* pulsos enteros */
+static float tp_bfrac;                   /* y la fracción, 0..1 */
+static volatile float tp_beats;          /* la posición para el UI: pulsos (vuelve a 0 al reiniciar) */
+static volatile uint32_t tp_resets;      /* cuántas veces se reinició (el UI lo ve) */
+static volatile uint32_t tp_reset_req;   /* el UI pide reiniciar (PLAY): distinto de tp_reset_done */
+static uint32_t tp_reset_done;
+static volatile uint8_t tp_locked;       /* una idea suena: un acorde nuevo no reinicia el reloj */
+static int tp_gate_was;
+static uint32_t clk_last = ~0u, arp_last = ~0u, bp_last = ~0u;   /* el último paso tocado de cada uno */
 static uint32_t arp_i, arp_rng = 0x1234567u;
 static volatile uint32_t arp_steps;      /* pasos tocados (para las pruebas) */
 
@@ -323,7 +333,6 @@ static void arp_release(int low)        /* las voces del arpegio (low 0) o del b
 #define arp_release_all() arp_release(0)
 
 /* el bajo pulsado: su paso y su nota (la del bajo; con octavas o quinta, uno sí y otro no) */
-static float bp_cnt;
 static uint32_t bp_i;
 static int bp_was;
 static float bp_step_len(void)
@@ -350,6 +359,7 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     float gain = (float)master_q12 / 4096.0f * 7000000.0f;
     float dmix = set.dly_on ? (float)set.dly_mix * 0.07f : 0.0f, dfb = set.dly_on ? (float)set.dly_fb * 0.09f : 0.0f;
     float rmix = set.rev_on ? (float)set.rev_mix * 0.12f : 0.0f, dtarget = dly_target();
+    float binc = (float)set.tempo / 60.0f / SR;   /* pulsos por muestra */
     rv_fb = 0.70f + (float)set.rev_size * 0.024f;
     rv_tone = 0.25f + (float)set.rev_tone * 0.08f;
     {   /* la envolvente, una vez por bloque */
@@ -378,35 +388,53 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             arp_was = set.arp;
             bp_was = bon;
             take_chord(&achord);
-            if (run && !ran) { midi_rt(0xFAu); clk_cnt = 0.0f; }
+            if (run && !ran) midi_rt(0xFAu);
             else if (!run && ran) midi_rt(0xFCu);
             if (!on) arp_release(0);
             if (!bon) arp_release(1);
+            /* el que se enciende espera a la siguiente línea de la rejilla: entra a tiempo con lo que ya suena */
+            if (on) arp_last = tp_bint * (uint32_t)(set.arp_div == 0 ? 2 : set.arp_div == 1 ? 3 : 4)
+                               + (uint32_t)(tp_bfrac * (float)(set.arp_div == 0 ? 2 : set.arp_div == 1 ? 3 : 4));
+            if (bon) bp_last = tp_bint * (uint32_t)(set.bp_div + 1u) + (uint32_t)(tp_bfrac * (float)(set.bp_div + 1u));
         }
         if (!on || !achord.gate) {
             if (achord.gate == 0) arp_release(0);
-            arp_cnt = 0.0f;                  /* el siguiente acorde arranca el arpegio en el acto */
             arp_i = 0;
         }
         if (!bon || !achord.gate) {
             if (achord.gate == 0) arp_release(1);
-            bp_cnt = 0.0f;
             bp_i = 0;
         }
+        /* el reloj vuelve a cero: si lo pide PLAY, o con el primer acorde tras el silencio (sin idea sonando);
+         * entonces el arpegio y el bajo tocan en el acto */
+        if (tp_reset_req != tp_reset_done || (achord.gate && !tp_gate_was && !tp_locked)) {
+            tp_reset_done = tp_reset_req;
+            tp_bint = 0;
+            tp_bfrac = 0.0f;
+            clk_last = arp_last = bp_last = ~0u;
+            tp_resets++;
+        }
+        tp_gate_was = achord.gate;
     }
     { uint32_t pkt; int port; while (plat_midi_in(&pkt, &port)) {} }   /* (la entrada MIDI llegará más adelante) */
     for (i = 0; i < n; i++) {
         float l = 0.0f, r = 0.0f, b, s, lowsum = 0.0f;
-        if (set.arp || set.bp_on) {
-            clk_cnt -= 1.0f;
-            if (clk_cnt <= 0.0f) { clk_cnt += SR * 60.0f / (float)set.tempo / 24.0f; midi_rt(0xF8u); }
-            if (achord.gate && set.arp) {
-                arp_cnt -= 1.0f;
-                if (arp_cnt <= 0.0f) { float step = arp_step_len(); arp_cnt += step; arp_fire(step); }
+        {   /* el reloj maestro avanza; cada uno toca al cruzar su línea de la rejilla */
+            static const uint8_t ARP_PB[3] = {2, 3, 4}, BP_PB[4] = {1, 2, 3, 4};
+            uint32_t idx;
+            tp_bfrac += binc;
+            if (tp_bfrac >= 1.0f) { tp_bfrac -= 1.0f; tp_bint++; }
+            idx = tp_bint * 24u + (uint32_t)(tp_bfrac * 24.0f);
+            if (idx != clk_last) { clk_last = idx; if (set.arp || set.bp_on) midi_rt(0xF8u); }
+            if (set.arp) {
+                uint32_t pb = ARP_PB[set.arp_div % 3u];
+                idx = tp_bint * pb + (uint32_t)(tp_bfrac * (float)pb);
+                if (idx != arp_last) { arp_last = idx; if (achord.gate) arp_fire(arp_step_len()); }
             }
-            if (achord.gate && set.bp_on) {
-                bp_cnt -= 1.0f;
-                if (bp_cnt <= 0.0f) { float step = bp_step_len(); bp_cnt += step; bp_fire(step); }
+            if (set.bp_on) {
+                uint32_t pb = BP_PB[set.bp_div % 4u];
+                idx = tp_bint * pb + (uint32_t)(tp_bfrac * (float)pb);
+                if (idx != bp_last) { bp_last = idx; if (achord.gate) bp_fire(bp_step_len()); }
             }
         }
         for (j = 0; j < NPAD; j++) {
@@ -477,8 +505,10 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         lr[2 * i] = (int32_t)(fm_tanhf(l) * gain_now);
         lr[2 * i + 1] = (int32_t)(fm_tanhf(r) * gain_now);
     }
+    tp_beats = (float)tp_bint + tp_bfrac;    /* para el UI: dónde va el reloj */
 }
 
+/* (tp_beats se escribe al final de cada bloque: ver app_render_end) */
 void app_panic(void)
 {
     int j;
@@ -504,15 +534,16 @@ static struct {
     uint32_t keys, btn;
     uint8_t redraw;
     uint8_t gate_hold_off;
-    uint8_t arp_turned;
+    uint8_t arp_turned;                  /* con ARP mantenido se giró un knob: al soltar no se conmuta */
     uint8_t fx_page;                     /* la última página de efectos (2 delay, 3 reverb): FX vuelve a ella */
-    uint8_t page;                        /* de quién son K1..K4: 0 el acorde, 1 el arpegiador, 2 delay, 3 reverb, 4 envolvente */
+    uint8_t page;                        /* de quién son K1..K4: 0 acorde, 1 arpegiador, 2 delay, 3 reverb,
+                                          * 4..6 envolventes (pad, arpegio, bajo), 7 bajo pulsado */
     uint8_t rec;                         /* 0 no, 1 armado (espera el primer acorde), 2 grabando */
     uint8_t play_bank;                   /* el banco que suena */
     uint8_t next_bank;                   /* el que sonará al acabar el bucle (0xFF: ninguno) */
     uint8_t playing;
     float rec_acc, play_acc;             /* corcheas desde que empezó la grabación / dentro del bucle */
-    uint32_t rec_sig, last_ms, shown_pos;                        /* de quién son K1..K4: 0 el acorde, 1 el arpegiador */                  /* con ARP mantenido se giró un knob: al soltar no se conmuta */
+    uint32_t rec_sig, shown_pos;
     uint32_t stop_t;                     /* la tecla STOP bajó (0: no está pulsada, o ya actuó)
                                           * corta: para el acorde; un segundo: HOLD sí / no */
 } st;
@@ -755,9 +786,16 @@ static void seq_play(int on);
 
 static void seq_tick(void)
 {
-    uint32_t now = plat_ms();
-    float d = (float)(now - st.last_ms) / eighth_ms();
-    st.last_ms = now;
+    /* el tiempo de las ideas sale del reloj del audio (en corcheas), no del de la pantalla */
+    static float last_beats;
+    static uint32_t last_resets;
+    float b = tp_beats, d;
+    uint32_t rs = tp_resets;
+    d = (rs != last_resets ? b : b - last_beats) * 2.0f;
+    if (d < 0.0f) d = 0.0f;
+    last_beats = b;
+    last_resets = rs;
+    tp_locked = (uint8_t)(st.playing || st.rec == 2);   /* sonando o grabando: el reloj no se reinicia solo */
     if (st.rec == 2) st.rec_acc += d;
     if (st.playing && PLAY_LOOP.len) {
         st.play_acc += d;
@@ -777,7 +815,10 @@ static void seq_current(int *degree, unsigned *mods, int *inv)
 {
     const loop_t *L = &PLAY_LOOP;
     int i, k = L->n - 1;
-    uint32_t pos = (uint32_t)st.play_acc;
+    float ahead = st.play_acc + 45.0f / eighth_ms();   /* 45 ms antes: el acorde ya está cuando llega el paso */
+    uint32_t pos;
+    if (ahead >= (float)L->len) ahead -= (float)L->len;
+    pos = (uint32_t)ahead;
     for (i = 0; i < L->n; i++)
         if (L->ev[i].step <= pos) k = i;
     *degree = L->ev[k].degree;
@@ -791,6 +832,8 @@ static void seq_play(int on)
     st.next_bank = 0xFFu;
     st.playing = (uint8_t)(on && REC_LOOP.len);
     st.play_acc = 0.0f;
+    if (st.playing) tp_reset_req = tp_reset_req + 1u;   /* la idea y el reloj empiezan juntos */
+    tp_locked = st.playing;
     if (!st.playing) st.gate_hold_off = 1;   /* al parar, el acorde calla */
     st.redraw = 1;
 }
