@@ -291,3 +291,27 @@ expect loop_len 8
 tap SEQ
 wait 30
 expect loop_len 8
+# --- ENV: la envolvente del pad; sostenido a 0, el acorde se apaga solo aunque siga pulsado ---
+tap ENV
+wait 30
+expect page 4
+turn K3 -10
+wait 30
+expect env_s 0
+shot env.png
+key 25 down
+wait 30
+key 25 up
+key 0 down
+wait 200
+expect pad_on 1
+wait 3000
+expect pad_on 0
+expect degree 0
+key 0 up
+turn K3 10
+wait 30
+expect env_s 10
+tap ENV
+wait 30
+expect page 0

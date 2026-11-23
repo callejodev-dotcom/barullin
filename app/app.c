@@ -14,7 +14,7 @@
 #define SR 44100.0f
 
 /* ------------------------------------------------------------- ajustes --- */
-#define SET_MAGIC 0x42524C37u            /* "BRL7" */
+#define SET_MAGIC 0x42524C38u            /* "BRL8" */
 #define LOOP_MAX 64                      /* cambios de acorde en una idea */
 #define LOOP_STEPS 128                   /* 16 compases de corcheas */
 typedef struct { uint8_t step; int8_t degree; uint8_t mods; uint8_t inv; } loop_ev_t;
@@ -45,6 +45,7 @@ typedef struct {
     uint8_t dly_on, rev_on;
     uint8_t rev_size;                    /* 0..9: tamaño de la sala */
     uint8_t rev_tone;                    /* 0..9: oscura .. brillante */
+    uint8_t env_a, env_d, env_s, env_r;  /* la envolvente del pad: ataque, caída (0..9), sostenido (0..10), release (0..9) */
     uint8_t cur_bank;                    /* el banco elegido: REC graba en él, PLAY lo toca */
     loop_t bank[NBANK];
 } settings_t;
@@ -103,7 +104,12 @@ static void pluck(int note, int vel)
 /* ---------------------------------------------------------------- audio --- */
 #define NPAD 6
 #define NPLK 8
-typedef struct { float p1, p2, i1, i2, env; int note, gate; } pad_v;
+typedef struct { float p1, p2, i1, i2, env; int note, gate, stage; } pad_v;   /* stage: 0 ataque, 1 caída */
+
+/* los tiempos de la envolvente, en segundos (exponenciales: el knob se siente igual en todo su recorrido) */
+static float env_att_s(int a) { return 0.002f * fm_exp2f((float)a * (9.9658f / 9.0f)); }   /* 2 ms .. 2 s */
+static float env_dec_s(int d) { return 0.05f * fm_exp2f((float)d * (5.9069f / 9.0f)); }    /* 50 ms .. 3 s */
+static float env_rel_s(int r) { return 0.02f * fm_exp2f((float)r * (7.6439f / 9.0f)); }    /* 20 ms .. 4 s */
 typedef struct {
     float ph, inc, env, amp;
     int32_t left;                        /* arpegio: muestras que le quedan sonando; -1 un rasgueo (se apaga solo) */
@@ -148,6 +154,7 @@ static void take_chord(const snd_chord *c)
             if (best < 0) continue;
             pad[best].note = c->notes[i];
             pad[best].gate = 1;
+            pad[best].stage = 0;
             pad[best].i1 = note_inc(c->notes[i]) * 1.0040f;   /* +7 cents */
             pad[best].i2 = note_inc(c->notes[i]) * 0.9960f;   /* -7 cents */
             used[best] = 1;
@@ -292,6 +299,8 @@ static void arp_release_all(void)
         if (plk[j].left > 0) plk[j].left = 1;   /* se sueltan en la siguiente muestra (y su note off) */
 }
 
+static float e_att, e_dec, e_rel, e_sus;
+
 void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
 {
     uint32_t i, seq = snd_seq;
@@ -302,6 +311,12 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     float rmix = set.rev_on ? (float)set.rev_mix * 0.12f : 0.0f, dtarget = dly_target();
     rv_fb = 0.70f + (float)set.rev_size * 0.024f;
     rv_tone = 0.25f + (float)set.rev_tone * 0.08f;
+    {   /* la envolvente, una vez por bloque */
+        e_att = 1.0f / (env_att_s(set.env_a) * SR);
+        e_dec = fm_expf(-1.0f / (env_dec_s(set.env_d) * SR));
+        e_rel = fm_expf(-1.0f / (env_rel_s(set.env_r) * SR));
+        e_sus = (float)set.env_s / 10.0f;
+    }
     if (seq != snd_seen) {
         snd_seen = seq;
         take_chord(&snd_buf[seq & 1u]);
@@ -335,8 +350,10 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         }
         for (j = 0; j < NPAD; j++) {
             pad_v *v = &pad[j];
-            if (v->gate) { v->env += 1.0f / (0.08f * SR); if (v->env > 1.0f) v->env = 1.0f; }
-            else if (v->env > 0.0f) { v->env *= 0.99993f; if (v->env < 0.0001f) v->env = 0.0f; }
+            if (v->gate) {
+                if (v->stage == 0) { v->env += e_att; if (v->env >= 1.0f) { v->env = 1.0f; v->stage = 1; } }
+                else v->env = e_sus + (v->env - e_sus) * e_dec;
+            } else if (v->env > 0.0f) { v->env *= e_rel; if (v->env < 0.0001f) v->env = 0.0f; }
             if (v->env == 0.0f) continue;
             v->p1 += v->i1; if (v->p1 >= 1.0f) v->p1 -= 1.0f;
             v->p2 += v->i2; if (v->p2 >= 1.0f) v->p2 -= 1.0f;
@@ -419,7 +436,7 @@ static struct {
     uint8_t gate_hold_off;
     uint8_t arp_turned;
     uint8_t fx_page;                     /* la última página de efectos (2 delay, 3 reverb): FX vuelve a ella */
-    uint8_t page;                        /* de quién son K1..K4: 0 el acorde, 1 el arpegiador, 2 delay, 3 reverb */
+    uint8_t page;                        /* de quién son K1..K4: 0 el acorde, 1 el arpegiador, 2 delay, 3 reverb, 4 envolvente */
     uint8_t rec;                         /* 0 no, 1 armado (espera el primer acorde), 2 grabando */
     uint8_t play_bank;                   /* el banco que suena */
     uint8_t next_bank;                   /* el que sonará al acabar el bucle (0xFF: ninguno) */
@@ -459,6 +476,10 @@ static void settings_defaults(void)
     set.rev_on = 1;
     set.rev_size = 6;
     set.rev_tone = 7;
+    set.env_a = 5;                           /* ~90 ms: lo que sonaba antes */
+    set.env_d = 5;
+    set.env_s = 10;
+    set.env_r = 5;                           /* ~0,4 s */
     set.cur_bank = 0;
     {
         int b;
@@ -485,6 +506,7 @@ static void settings_load(void)
         || set.arp_len < 1u || set.arp_len > 9u || set.tempo < 40u || set.tempo > 220u
         || set.dly_mix > 10u || set.dly_div > 5u || set.dly_fb > 9u || set.rev_mix > 10u
         || set.dly_on > 1u || set.rev_on > 1u || set.rev_size > 9u || set.rev_tone > 9u
+        || set.env_a > 9u || set.env_d > 9u || set.env_s > 10u || set.env_r > 9u
         || set.cur_bank >= NBANK || !banks_ok())
         settings_defaults();
 }
@@ -529,6 +551,22 @@ static void int_text(int32_t v, char *b)
     if (v < 0) *b++ = '-';
     while (n) *b++ = t[--n];
     *b = 0;
+}
+
+static void time_text(float sec, char *t)   /* "80ms", "1.2s" */
+{
+    if (sec < 1.0f) {
+        int_text((int32_t)(sec * 1000.0f + 0.5f), t);
+        text_cat(t, "ms");
+    } else {
+        char d[4];
+        int32_t ds = (int32_t)(sec * 10.0f + 0.5f);
+        int_text(ds / 10, t);
+        text_cat(t, ".");
+        int_text(ds % 10, d);
+        text_cat(t, d);
+        text_cat(t, "s");
+    }
 }
 
 void app_say(const char *a, const char *b)
@@ -825,8 +863,11 @@ static void input(void)
             } else {
                 app_say(t, REC_LOOP.len ? "" : "VACIO");
             }
+        } else if (k == B_ENV) {
+            st.page = st.page == 4 ? 0 : 4;  /* los knobs, a la envolvente del pad (y vuelta) */
+            app_say("ENVOLVENTE", st.page == 4 ? "PAD" : "NO");
         } else if (k == B_FX) {
-            if (st.page < 2)                 /* desde fuera: a la última página de efectos */
+            if (st.page != 2 && st.page != 3)                 /* desde fuera: a la última página de efectos */
                 st.page = st.fx_page ? st.fx_page : 2;
             else                             /* dentro: delay, reverb, y fuera */
                 st.page = st.page == 2 ? 3 : 0;
@@ -910,6 +951,24 @@ static void input(void)
                 int_text(set.rev_mix * 10, t); text_cat(t, "%");
                 set_changed("REVERB MEZCLA", t);
             }
+        } else if (st.page == 4 && k >= EN_K1) {   /* ENVOLVENTE */
+            if (k == EN_K1) {
+                set.env_a = (uint8_t)clamp((int32_t)set.env_a + e, 0, 9);
+                time_text(env_att_s(set.env_a), t);
+                set_changed("ATAQUE", t);
+            } else if (k == EN_K2) {
+                set.env_d = (uint8_t)clamp((int32_t)set.env_d + e, 0, 9);
+                time_text(env_dec_s(set.env_d), t);
+                set_changed("CAIDA", t);
+            } else if (k == EN_K3) {
+                set.env_s = (uint8_t)clamp((int32_t)set.env_s + e, 0, 10);
+                int_text(set.env_s * 10, t); text_cat(t, "%");
+                set_changed("SOSTENIDO", t);
+            } else {
+                set.env_r = (uint8_t)clamp((int32_t)set.env_r + e, 0, 9);
+                time_text(env_rel_s(set.env_r), t);
+                set_changed("RELEASE", t);
+            }
         } else if (k == EN_SELECT) {
             set.tempo = (uint8_t)clamp((int32_t)set.tempo + e, 40, 220);
             int_text(set.tempo, t);
@@ -943,7 +1002,7 @@ static void input(void)
     plat_glow(1);
     {
         uint32_t lit = btn | (set_dirty ? 1u << B_SAVE : 0u) | (set.arp ? 1u << B_ARP : 0u)
-                       | (st.page >= 2 ? 1u << B_FX : 0u);
+                       | (st.page == 2 || st.page == 3 ? 1u << B_FX : 0u) | (st.page == 4 ? 1u << B_ENV : 0u);
         if (st.playing || st.rec == 2) lit |= 1u << B_PLAY;
         if (st.rec == 2 || (st.rec == 1 && (plat_ms() / 250u) & 1u)) lit |= 1u << B_REC;   /* armado: parpadea */
         plat_play_red(st.rec == 2);
@@ -1070,7 +1129,18 @@ static void draw(void)
         chip(i < 6 ? 2 + i * 40 : 2 + (i - 6) * 48, i < 6 ? 22 : 42, i < 6 ? 38 : 46, BK_LABEL[i], on);
     }
     cv_rect(0, 64, 240, 1, C_LINE);
-    if (st.page >= 2 && !(st.btn >> B_ARP & 1u)) {   /* los knobs del delay o de la reverb */
+    if (st.page == 4 && !(st.btn >> B_ARP & 1u)) {   /* los knobs de la envolvente */
+        static const char *const LBL[4] = {"K1 ATAQUE", "K2 CAIDA", "K3 SOST", "K4 RELEASE"};
+        char v[4][12];
+        time_text(env_att_s(set.env_a), v[0]);
+        time_text(env_dec_s(set.env_d), v[1]);
+        int_text(set.env_s * 10, v[2]); text_cat(v[2], "%");
+        time_text(env_rel_s(set.env_r), v[3]);
+        for (i = 0; i < 4; i++) {
+            cv_text(4 + i * 60, 68, &FONT_XS, LBL[i], C_AMB);
+            cv_text(4 + i * 60, 81, &FONT_XS, v[i], C_WHITE);
+        }
+    } else if ((st.page == 2 || st.page == 3) && !(st.btn >> B_ARP & 1u)) {   /* los knobs del delay o de la reverb */
         static const char *const LD[4] = {"DELAY", "K2 TIEMPO", "K3 REPET", "K4 MEZCLA"};
         static const char *const LR[4] = {"REVERB", "K2 TAMANO", "K3 TONO", "K4 MEZCLA"};
         const char *const *LBL = st.page == 2 ? LD : LR;
@@ -1163,6 +1233,7 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "dly_on")) *got = set.dly_on;
     else if (!strcmp(what, "rev_on")) *got = set.rev_on;
     else if (!strcmp(what, "rev_size")) *got = set.rev_size;
+    else if (!strcmp(what, "env_s")) *got = set.env_s;
     else if (!strcmp(what, "pad_on")) { int j, on = 0; for (j = 0; j < NPAD; j++) on |= pad[j].env > 0.01f; *got = on; }
     else if (!strcmp(what, "bass_on")) *got = bass_env > 0.01f;
     else if (!strcmp(what, "playing")) *got = st.playing;
