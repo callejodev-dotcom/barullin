@@ -363,6 +363,7 @@ static inline float reverb_ch(int ch, float in)
 /* -------------------------------------------------------- caja de ritmos --- */
 /* Bombo: seno que cae de tono; caja: ruido y un tono; charles: ruido brillante y corto. Seca, al centro. */
 static float dk_env, dk_pitch, dk_ph, ds_env, ds_tone, ds_ph, dh_env, dh_prev;
+static float ds_ph2, ds_bend, ds_click, sn_hp, sn_x1, sn_lp, sn_lp2;   /* la caja: segundo tono, caída de afinación, golpe, filtros */
 static float dk_amp, ds_amp, dh_amp;
 static uint32_t d_rng = 0x51ED27u, drum_last = ~0u;
 static volatile uint32_t drum_hits;      /* golpes tocados (para las pruebas) */
@@ -373,7 +374,7 @@ static void drum_hit(int which, float amp)
     static const uint8_t NOTE[3] = {36, 38, 42};
     if (amp <= 0.0f) return;
     if (which == 0) { dk_env = 1.0f; dk_pitch = 1.0f; dk_ph = 0.0f; dk_amp = amp; }
-    else if (which == 1) { ds_env = 1.0f; ds_tone = 1.0f; ds_amp = amp; }
+    else if (which == 1) { ds_env = 1.0f; ds_tone = 1.0f; ds_bend = 1.0f; ds_click = 1.0f; ds_amp = amp; }
     else { dh_env = 1.0f; dh_amp = amp; }
     midi_ch(0x90u, 10, NOTE[which], (uint32_t)clamp((int32_t)(amp * 127.0f), 1, 127));
     midi_ch(0x80u, 10, NOTE[which], 0);
@@ -407,12 +408,24 @@ static inline float drum_sample(void)
         dk_env *= 0.99984f;                  /* ~140 ms */
         dk_pitch *= 0.9988f;                 /* el golpe: el tono cae rápido */
     }
-    if (ds_env > 0.0005f) {
-        ds_ph += 185.0f / SR;
+    if (ds_env > 0.0005f) {                  /* caja tipo 909: parche (dos tonos que caen un poco) + bordonera */
+        float bend = 1.0f + 0.35f * ds_bend, body, wires;
+        ds_ph += 185.0f * bend / SR;
         if (ds_ph >= 1.0f) ds_ph -= 1.0f;
-        out += (n * 0.5f * ds_env + tsin(ds_ph) * 0.35f * ds_tone) * ds_amp * 0.6f;
-        ds_env *= 0.99940f;                  /* ~40 ms */
-        ds_tone *= 0.99900f;
+        ds_ph2 += 330.0f * bend / SR;
+        if (ds_ph2 >= 1.0f) ds_ph2 -= 1.0f;
+        body = (tsin(ds_ph) * 0.62f + tsin(ds_ph2) * 0.38f) * ds_tone;
+        /* la bordonera: ruido sin graves (paso alto ~900 Hz) ni siseo (dos pasos bajos ~5 kHz) */
+        sn_hp = 0.886f * (sn_hp + n - sn_x1);
+        sn_x1 = n;
+        sn_lp += (sn_hp - sn_lp) * 0.50f;
+        sn_lp2 += (sn_lp - sn_lp2) * 0.50f;
+        wires = sn_lp2 * ds_env;
+        out += (body * 0.95f + wires * 1.10f + sn_lp * ds_click * 0.30f) * ds_amp * 0.7f;
+        ds_env *= 0.99985f;                  /* la bordonera: ~150 ms */
+        ds_tone *= 0.99950f;                 /* el parche: ~45 ms */
+        ds_bend *= 0.9980f;                  /* la afinación cae en ~10 ms */
+        ds_click *= 0.990f;                  /* el golpe: ~2 ms */
     }
     if (dh_env > 0.0005f) {
         float hp = n - dh_prev;              /* ruido brillante */
