@@ -530,7 +530,7 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         }
     }
     float pitch_mul = lo[LFO_PAD].pitch;
-    float harm_a = 0.35f * (1.0f + lo[LFO_ARP].harm), harm_b = 0.45f * (0.5f + 0.5f * lo[LFO_BASS].harm) * (set.lfo[LFO_BASS].dest == 1);
+    float harm_a = 0.35f * (1.0f + lo[LFO_ARP].harm), harm_b = 0.25f * (1.0f + lo[LFO_BASS].harm);   /* un poco de segundo armónico: la nota se entiende en cualquier altavoz */
     float gain = (float)master_q12 / 4096.0f * 7000000.0f;
     float dmix = set.dly_on ? (float)set.dly_mix * 0.07f : 0.0f, dfb = set.dly_on ? (float)set.dly_fb * 0.09f : 0.0f;
     float rmix = set.rev_on ? (float)set.rev_mix * 0.12f : 0.0f, dtarget = dly_target();

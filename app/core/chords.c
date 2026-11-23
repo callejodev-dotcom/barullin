@@ -162,7 +162,7 @@ void bl_chord_build(int key, int mode, int degree, unsigned mods,
 
     out->n = (uint8_t)n;
     for (int i = 0; i < n; i++) out->notes[i] = tmp[i];
-    out->bass = (uint8_t)clamp_midi(root_note - 24);
+    out->bass = (uint8_t)clamp_midi(root_note - 12);   /* una octava abajo: dos sonaba demasiado grave para un altavoz pequeño */
 }
 
 /* ---------- voice leading ---------- */

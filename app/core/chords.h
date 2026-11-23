@@ -43,7 +43,7 @@ enum bl_mod {
 typedef struct {
     uint8_t n;                    /* cuántas notas */
     uint8_t notes[BL_MAX_NOTES];  /* MIDI, de grave a agudo */
-    uint8_t bass;                 /* nota de bajo (fundamental, dos octavas abajo) */
+    uint8_t bass;                 /* nota de bajo (fundamental, una octava abajo) */
     uint8_t root;                 /* clase de altura de la fundamental, 0..11 */
     char    name[BL_NAME_LEN];    /* "Am7", "Gsus4", "Cadd9"... */
 } bl_chord;
