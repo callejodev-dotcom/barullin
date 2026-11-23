@@ -14,7 +14,7 @@
 #define SR 44100.0f
 
 /* ------------------------------------------------------------- ajustes --- */
-#define SET_MAGIC 0x42524C3Bu            /* "BRL;" */
+#define SET_MAGIC 0x42524C3Cu            /* "BRL<" */
 #define LOOP_MAX 64                      /* cambios de acorde en una idea */
 #define LOOP_STEPS 128                   /* 16 compases de corcheas */
 typedef struct { uint8_t step; int8_t degree; uint8_t mods; uint8_t inv; } loop_ev_t;
@@ -573,8 +573,8 @@ static void settings_defaults(void)
     set.dly_div = 2;
     set.dly_fb = 4;
     set.rev_mix = 4;
-    set.dly_on = 1;
-    set.rev_on = 1;
+    set.dly_on = 0;                          /* los efectos, apagados de serie */
+    set.rev_on = 0;
     set.rev_size = 6;
     set.rev_tone = 7;
     set.env_a = 5;                           /* ~90 ms: lo que sonaba antes */

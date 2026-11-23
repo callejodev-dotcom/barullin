@@ -2,6 +2,9 @@
 #   app/build/host/barullin_host app/tests/basic.txt app/build/host
 wait 600
 shot boot.png
+# los efectos, apagados de serie
+expect dly_on 0
+expect rev_on 0
 # grado I en Do mayor: C E G
 key 0 down
 wait 50
