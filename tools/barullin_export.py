@@ -522,6 +522,8 @@ def write_als(path, ideas_out, tpl=None, stage=4):
                 x = x[:3] + (ps,) + x[4:]
             fixed.append(x)
         ideas_out = fixed
+    atracks = tracks.findall("AudioTrack")
+    aproto = copy.deepcopy(atracks[0]) if atracks else None
     c = proto.find(".//MidiClip")
     clip_proto = copy.deepcopy(c) if c is not None else ET.fromstring(open(os.path.join(HERE, "ableton", "clip.xml"), "rb").read())
     gs = clip_proto.find("GrooveSettings/GrooveId")
@@ -622,6 +624,76 @@ def write_als(path, ideas_out, tpl=None, stage=4):
     if stage < 4:
         ls.find("NextPointeeId").set("Value", str(next_id))
         return save_als(root, path)
+    # el sonido original del FM-1: una pista de audio, arriba del todo, con su vuelta en la escena de la idea
+    if aproto is not None and any(x and len(x) > 6 for x in ideas_out):
+        t = aproto
+        for d in list(t.find("DeviceChain/DeviceChain/Devices")):
+            t.find("DeviceChain/DeviceChain/Devices").remove(d)
+        for env in t.findall("AutomationEnvelopes/Envelopes"):
+            for e in list(env):
+                env.remove(e)
+        t.set("Id", str(tid))
+        tid += 1
+        remap = {}
+        for e in t.iter():
+            if e.get("Id") is not None and is_pointee(e.tag):
+                remap[e.get("Id")] = str(next_id)
+                e.set("Id", str(next_id))
+                next_id += 1
+        for e in t.iter("PointeeId"):
+            if e.get("Value") in remap:
+                e.set("Value", remap[e.get("Value")])
+        t.find("Name/EffectiveName").set("Value", "FM-1 (original)")
+        t.find("Name/UserName").set("Value", "FM-1 (original)")
+        t.find("Color").set("Value", "14")
+        aslots = t.findall("DeviceChain/MainSequencer/ClipSlotList/ClipSlot")
+        for sl in aslots:
+            v = sl.find("ClipSlot/Value")
+            for e in list(v):
+                v.remove(e)
+        ac_proto = ET.fromstring(open(os.path.join(HERE, "ableton", "audioclip.xml"), "rb").read())
+        for si, x in enumerate(ideas_out[:len(aslots)]):
+            if not x or len(x) < 7 or not os.path.exists(x[6]):
+                continue
+            wav, beats, tempo = x[6], x[4], x[1]
+            import wave
+            with wave.open(wav) as w:
+                nfr, rate = w.getnframes(), w.getframerate()
+            secs = nfr / float(rate)
+            ac = copy.deepcopy(ac_proto)
+            ac.set("Id", "0")
+            ac.set("Time", "0")
+            ac.find("Name").set("Value", "FM-1 - " + x[0])
+            ac.find("CurrentStart").set("Value", "0")
+            ac.find("CurrentEnd").set("Value", f"{beats:g}")
+            lp = ac.find("Loop")
+            for tag, val in (("LoopStart", 0), ("LoopEnd", beats), ("StartRelative", 0), ("OutMarker", beats),
+                             ("HiddenLoopStart", 0), ("HiddenLoopEnd", beats)):
+                lp.find(tag).set("Value", f"{val:g}")
+            lp.find("LoopOn").set("Value", "true")
+            ac.find("IsWarped").set("Value", "true")
+            ac.find("WarpMode").set("Value", "3")       # re-pitch: al mismo tempo, el audio tal cual
+            wm = ac.find("WarpMarkers")
+            for e in list(wm):
+                wm.remove(e)
+            ET.SubElement(wm, "WarpMarker", Id="0", SecTime="0", BeatTime="0")
+            ET.SubElement(wm, "WarpMarker", Id="1", SecTime=f"{secs:.10g}", BeatTime=f"{beats:g}")
+            rts = ac.find("TimeSignature/TimeSignatures/RemoteableTimeSignature")
+            rts.find("Numerator").set("Value", str(x[2][0]))
+            rts.find("Denominator").set("Value", str(x[2][1]))
+            fr = ac.find("SampleRef/FileRef")
+            proj = os.path.dirname(path)
+            fr.find("RelativePathType").set("Value", "3")
+            fr.find("RelativePath").set("Value", os.path.relpath(wav, proj).replace(os.sep, "/"))
+            fr.find("Path").set("Value", os.path.abspath(wav).replace(os.sep, "/"))
+            fr.find("OriginalFileSize").set("Value", str(os.path.getsize(wav)))
+            fr.find("OriginalCrc").set("Value", "0")
+            sr = ac.find("SampleRef")
+            sr.find("LastModDate").set("Value", str(int(os.path.getmtime(wav))))
+            sr.find("DefaultDuration").set("Value", str(nfr))
+            sr.find("DefaultSampleRate").set("Value", str(rate))
+            aslots[si].find("ClipSlot/Value").append(ac)
+        tracks.insert(0, t)
     # las escenas: una por idea, con su nombre, su tempo y su compás
     for si, sc in enumerate(scenes):
         x = ideas_out[si] if si < len(ideas_out) else None
@@ -645,6 +717,75 @@ def write_als(path, ideas_out, tpl=None, stage=4):
                     e.set("Value", v)
     ls.find("NextPointeeId").set("Value", str(next_id))
     save_als(root, path)
+
+
+# ---------------------------------------------------------------- el sonido original: el FM-1, en el simulador
+# El mismo firmware corre en el ordenador (base/tools/build.py --host): se le da la copia, toca cada idea con PLAY y se
+# graba. De la grabación sale una vuelta entera (la segunda: con las colas de la primera, como suena en bucle).
+def host_sim():
+    exe = os.path.join(ROOT, "app", "build", "host", "barullin_host")
+    src = os.path.join(ROOT, "app", "app.c")
+    if not os.path.exists(exe) or os.path.getmtime(exe) < os.path.getmtime(src):
+        print("preparando el simulador de Barullín (la primera vez tarda un poco)...")
+        r = subprocess.run([sys.executable, os.path.join(BASE_TOOLS, "build.py"), os.path.join(ROOT, "app"), "--host"],
+                           capture_output=True, text=True)
+        if r.returncode or not os.path.exists(exe):
+            print("  (no pude preparar el simulador: los proyectos salen sin el sonido original)\n" + r.stderr[-800:])
+            return None
+    return exe
+
+
+def render_original(backup, cur_bank, i, beats, tempo, outwav):
+    """toca la idea i en el simulador y deja en outwav una vuelta (la segunda). True si salió"""
+    import wave
+    exe = host_sim()
+    if not exe:
+        return False
+    loop_ms = beats * 60000.0 / tempo
+    work = tempfile.mkdtemp(prefix="barullin_")
+    script = os.path.join(work, "toca.txt")
+    seq = (i - cur_bank) % NBANK
+    with open(script, "w") as f:
+        f.write("wait 1500\nrestore %s\nwait 300\n" % os.path.abspath(backup))
+        f.write("tap SEQ\n" * seq + "wait 100\n")
+        f.write("turn K4 -20\nwait 50\n")                  # (el rasgueo callado: la tecla de abajo es la marca de tiempo)
+        f.write("wav toca.wav\nkey 14 down\nwait 20\nkey 14 up\ntap PLAY\n")
+        f.write("wait %d\nwavstop\ntap PLAY\nwait 50\n" % int(2 * loop_ms + 1500))
+    r = subprocess.run([exe, script, work], capture_output=True, text=True)
+    wpath, mlog = os.path.join(work, "toca.wav"), os.path.join(work, "midi_out.txt")
+    if not os.path.exists(wpath) or not os.path.exists(mlog):
+        return False
+    mark = start = None
+    for line in open(mlog):
+        m = re.match(r"\s*(\d+) ms: ([0-9A-F]{2}) ([0-9A-F]{2}) ([0-9A-F]{2})", line)
+        if not m:
+            continue
+        t, st = int(m.group(1)), int(m.group(2), 16)
+        if st == 0x90 and mark is None:
+            mark = t                              # la marca: aquí empezó la grabación
+        elif st & 0xF0 == 0x90 and st != 0x90 and mark is not None and start is None:
+            start = t                             # la primera nota de la idea: aquí empieza la vuelta
+    if mark is None or start is None:
+        return False
+    w = wave.open(wpath)
+    rate, ch, sw = w.getframerate(), w.getnchannels(), w.getsampwidth()
+    frames = w.readframes(w.getnframes())
+    w.close()
+    first = int(round((start - mark) / 1000.0 * rate)) + int(round(loop_ms / 1000.0 * rate))
+    n = int(round(loop_ms / 1000.0 * rate))
+    chunk_ = frames[first * ch * sw:(first + n) * ch * sw]
+    if len(chunk_) < n * ch * sw:
+        return False
+    if sw == 2 and not any(chunk_[k] | chunk_[k + 1] for k in range(0, len(chunk_), 64 * sw)):
+        return False                              # (en silencio: en el FM-1 no sonaba nada, todo a 0)
+    os.makedirs(os.path.dirname(outwav), exist_ok=True)
+    o = wave.open(outwav, "wb")
+    o.setnchannels(ch)
+    o.setsampwidth(sw)
+    o.setframerate(rate)
+    o.writeframes(chunk_)
+    o.close()
+    return True
 
 
 # ---------------------------------------------------------------- leer del FM-1
@@ -672,6 +813,7 @@ def main():
     ap.add_argument("--salida", default="Barullin Export")
     ap.add_argument("--vueltas", type=int, default=1, help="cuántas veces se repite cada idea en el MIDI")
     ap.add_argument("--port")
+    ap.add_argument("--sin-original", action="store_true", help="sin la pista con el sonido del FM-1")
     ap.add_argument("--todas", action="store_true", help="además, un proyecto con todas las ideas (una escena cada una)")
     ap.add_argument("--diagnostico", action="store_true", help="cuatro proyectos de prueba, para ver qué no le gusta a Live")
     ap.add_argument("--plantilla", help="(se recuerda para la próxima) " +"un Live Set vacío guardado con tu Ableton (con una pista MIDI), de molde")
@@ -715,11 +857,19 @@ def main():
         print(f"  {title}.mid  ({b1:g} pulsos, " + ", ".join(k.lower() for k, v in parts.items() if v) + ")")
     if not any(out):
         raise SystemExit("no hay ideas guardadas (graba con REC y guarda con SAVE)")
-    # un proyecto de Ableton por idea: su carpeta, su tempo y su compás, sus pistas (y la idea en la primera escena)
-    for x in out:
+    # un proyecto de Ableton por idea: su carpeta, su tempo y su compás, sus pistas (y la idea en la primera escena),
+    # y el sonido original del FM-1 en una pista de audio
+    cur_bank = objs.get(0, b"\0" * 8)[7] if len(objs.get(0, b"")) > 7 else 0
+    for i, x in enumerate(out):
         if not x:
             continue
         als = os.path.join(a.salida, x[0] + " Project", x[0] + ".als")
+        if not a.sin_original:
+            wav = os.path.join(os.path.dirname(als), "Samples", "Imported", "FM-1 - " + x[0] + ".wav")
+            print(f"  grabando el sonido original de {x[0]}...")
+            if render_original(bk, cur_bank, i, x[4], x[1], wav):
+                x = x[:6] + (wav,)
+                out[i] = x
         write_als(als, [x], a.plantilla)
         print(f"  {als}")
     if a.todas:

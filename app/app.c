@@ -1278,7 +1278,8 @@ static struct {
     uint8_t hinted;
     uint8_t kit_bank;
     int8_t bt_pick;                      /* Bluetooth: lo elegido con ALGORITHM (0 BUSCAR) */
-    uint8_t bt_tried, bt_last;           /* la reconexión de al arrancar, ya intentada; el último estado dicho */                    /* el banco cuyo sonido suena ahora (el que se edita) */                      /* el aviso de "sube el volumen", ya dado */                    /* FX: la capa cuyo envío lleva K4 (ALGORITHM la elige) */                     /* se pulsó una tecla de acorde: vuelve a sonar aunque sea el mismo */
+    uint8_t bt_tried, bt_last;
+    uint32_t bt_drawn;                   /* la última vez que se pintó la página de Bluetooth */           /* la reconexión de al arrancar, ya intentada; el último estado dicho */                    /* el banco cuyo sonido suena ahora (el que se edita) */                      /* el aviso de "sube el volumen", ya dado */                    /* FX: la capa cuyo envío lleva K4 (ALGORITHM la elige) */                     /* se pulsó una tecla de acorde: vuelve a sonar aunque sea el mismo */
     uint32_t q_sig, q_resets;
     int8_t q_deg;                        /* el acorde que espera (sigue esperando aunque se suelte la tecla) */
     uint8_t q_mods, q_inv;
@@ -2760,6 +2761,10 @@ void app_frame(void)
             st.redraw = 1;
         }
         if (plat_bta_lost() != PLAT_BTA_LOST_NONE) app_say("BLUETOOTH", "SE CORTO");
+        if (st.page == PG_BT && now - st.bt_drawn >= 300u) {   /* en su página, el estado al día (cada 0,3 s) */
+            st.bt_drawn = now;
+            st.redraw = 1;
+        }
     }
     if (ann_on() && ann_where()) {
         char t[48] = "";

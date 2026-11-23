@@ -67,8 +67,9 @@ Los modificadores se combinan: `7` + `9` da maj9, m9 o 9 según el grado; `sus4`
 
 ## Sacar las ideas al ordenador (MIDI y Ableton Live)
 
-Las ideas se guardan con SAVE (y sobreviven a las actualizaciones del firmware). Para sacarlas, con el FM-1 conectado
-por USB, Barullín encendido y parado:
+Las ideas se guardan con SAVE (y sobreviven a las actualizaciones del firmware). Lo cómodo: con el FM-1 conectado por
+USB, Barullín encendido y parado, **doble clic en `Sacar ideas.command`** (en el Mac; la primera vez prepara Python,
+y abre la carpeta al acabar). O, a mano:
 
 ```sh
 source .venv/bin/activate                       # (mido y python-rtmidi, como para instalar)
@@ -83,6 +84,9 @@ Sale la carpeta **Barullin Export**:
 - **Idea N - … Project/Idea N - ….als**: un proyecto de Ableton Live 12 **por idea**, con una pista por parte y la
   idea en la primera escena, con su tempo y su compás. Las pistas van sin instrumento: arrastra el que quieras a cada
   una. `--todas` hace además uno con todas (una escena por idea).
+- **FM-1 (original)**: en cada proyecto, una pista de audio con la idea tal como suena en el FM-1 (pad, bajo, arpegio,
+  ritmo, efectos y LFO), grabada del mismo firmware en el simulador del ordenador, una vuelta en bucle, para saber de
+  qué partes. `--sin-original` la quita.
 - **Barullin.barullin**: la copia de seguridad de todo. `python3 base/tools/fm1_backup.py restore "Barullin
   Export/Barullin.barullin"` la devuelve al FM-1 (pregunta en su pantalla: SEL sí, HOME no).
 
