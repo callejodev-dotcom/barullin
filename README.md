@@ -11,7 +11,7 @@ Construido sobre [fm1-base](https://github.com/charlesvestal/fm1-base) de Charle
 | Teclas blancas 1–7 | Grados I a vii de la tonalidad y el modo (en Do mayor: C Dm Em F G Am Bdim) |
 | Teclas blancas 8–16 | Placa de rasgueo: cada tecla, una nota del acorde, de grave a agudo |
 | Teclas negras (mantener) | `m/M` `7` `maj7` · `sus2` `sus4` · `9` `6` `dim/aug` · `INV1` `INV2` |
-| Última tecla negra | HOLD: el acorde sigue sonando al soltar |
+| Última tecla negra | HOLD (activado por defecto): el acorde sigue sonando al soltar; púlsala para quitarlo y callar el acorde |
 | K1 / K2 / K3 / K4 | Tonalidad / modo / octava / brillo del pad |
 | PRESET | Encadenar acordes (voice leading) sí o no |
 | OCT− / OCT+ | Octava |

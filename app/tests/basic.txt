@@ -13,7 +13,21 @@ expect note2 67
 shot c.png
 key 0 up
 wait 50
+# HOLD por defecto: el acorde sigue al soltar
+expect hold 1
+expect degree 0
+# la tecla HOLD (la última negra, tecla 25) lo quita y el acorde se calla
+key 25 down
+wait 30
+key 25 up
+wait 30
+expect hold 0
 expect degree -1
+key 25 down
+wait 30
+key 25 up
+wait 30
+expect hold 1
 # grado vi (sexta tecla blanca = tecla 9), con 7 (segunda negra = tecla 3): Am7
 key 9 down
 key 3 down

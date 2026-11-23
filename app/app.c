@@ -14,7 +14,7 @@
 #define SR 44100.0f
 
 /* ------------------------------------------------------------- ajustes --- */
-#define SET_MAGIC 0x42524C31u            /* "BRL1" */
+#define SET_MAGIC 0x42524C32u            /* "BRL2" */
 typedef struct {
     uint32_t magic;
     uint8_t key;                         /* 0 = C .. 11 = B */
@@ -22,7 +22,8 @@ typedef struct {
     int8_t octave;                       /* -2 .. +2 */
     uint8_t bright;                      /* 0..20: el corte del filtro del pad */
     uint8_t lead;                        /* voice leading */
-    uint8_t rsv[3];
+    uint8_t hold;                        /* el acorde sigue al soltar (por defecto, sí) */
+    uint8_t rsv[2];
 } settings_t;
 static settings_t set;
 static uint8_t set_dirty;
@@ -197,7 +198,7 @@ static struct {
     int degree;                          /* el grado que suena, -1 ninguno */
     unsigned mods;
     int inv;
-    int gate, hold;
+    int gate;
     uint8_t deg_order[NDEG];             /* qué grado se pulsó antes: manda el último */
     uint8_t deg_stamp;
     uint8_t strum_note[NSTRUM];          /* la nota que dio cada tecla de rasgueo (para su note off) */
@@ -222,13 +223,14 @@ static void settings_defaults(void)
     set.octave = 0;
     set.bright = 10;
     set.lead = 1;
+    set.hold = 1;
 }
 
 static void settings_load(void)
 {
     if (plat_store_load(OBJ_SETTINGS, &set, sizeof set) != (int)sizeof set || set.magic != SET_MAGIC
         || set.key > 11u || set.mode >= BL_MODE_COUNT || set.octave < -2 || set.octave > 2
-        || set.bright > 20u || set.lead > 1u)
+        || set.bright > 20u || set.lead > 1u || set.hold > 1u)
         settings_defaults();
 }
 
@@ -387,10 +389,10 @@ static void input(void)
     if (keys >> BK[BK_INV1] & 1u) inv = 1;
     if (keys >> BK[BK_INV2] & 1u) inv = 2;
     if ((keys >> BK[BK_HOLD] & 1u) && !(st.keys >> BK[BK_HOLD] & 1u)) {
-        st.hold = !st.hold;
-        app_say("HOLD", st.hold ? "ON" : "OFF");
+        set.hold = (uint8_t)!set.hold;
+        set_changed("HOLD", set.hold ? "SI" : "NO");
     }
-    if (degree < 0 && st.hold && st.gate) {   /* HOLD: el acorde sigue; los modificadores aún lo cambian */
+    if (degree < 0 && set.hold && st.gate) {   /* HOLD: el acorde sigue; los modificadores aún lo cambian */
         degree = st.degree;
         if (!mods) mods = st.mods;
     }
@@ -535,7 +537,7 @@ static void draw(void)
     }
     for (i = 0; i < NBK; i++) {
         int on = (int)(st.keys >> BK[i] & 1u);
-        if (i == BK_HOLD) on = st.hold;
+        if (i == BK_HOLD) on = set.hold;
         chip(i < 6 ? 2 + i * 40 : 2 + (i - 6) * 48, i < 6 ? 22 : 42, i < 6 ? 38 : 46, BK_LABEL[i], on);
     }
     cv_rect(0, 64, 240, 1, C_LINE);
@@ -591,7 +593,7 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "mods")) *got = (int)st.mods;
     else if (!strcmp(what, "key")) *got = set.key;
     else if (!strcmp(what, "mode")) *got = set.mode;
-    else if (!strcmp(what, "hold")) *got = st.hold;
+    else if (!strcmp(what, "hold")) *got = set.hold;
     else if (!strcmp(what, "dirty")) *got = set_dirty;
     else return 0;
     return 1;
