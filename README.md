@@ -29,7 +29,7 @@ Los knobs K1–K4 son de la página en la que estás. Cada botón recorre sus p�
 | | Reverb | sí / no | sala | tono | ancho estéreo | mezcla |
 | ENV | Pad, arpegio, bajo | — | ataque (2 ms–2 s) | caída (50 ms–3 s) | sostenido (0–100 %) | release (20 ms–4 s) |
 | LFO | LFO 1, 2, 3 | sí / no | destino (ver abajo) | velocidad (0,1–10 Hz) | cantidad | forma (seno, triángulo, cuadrada, azar) |
-| EDIT | Ritmo | silencio rápido | bombo (a negras) | caja (en el 2 y el 4) | charles a negras | charles a corcheas |
+| EDIT | Ritmo | silencio rápido | bombo (a negras) | caja (en el 2 y el 4) | charles (a corcheas) | apertura del charles (de cerrado a abierto) |
 | GLO | Global | — | tonalidad | modo | octava | brillo del pad (ALGORITHM: encadenar acordes sí/no) |
 | HOME | Principal | — | volumen pad | volumen bajo | volumen arpegio | volumen rasgueo |
 
