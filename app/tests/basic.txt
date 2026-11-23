@@ -78,12 +78,17 @@ key 16 up
 key 10 up
 key 7 up
 wait 50
-# K1 a Re, K2 a dórico: el grado I es Dm
+# GLO: K1 a Re, K2 a dórico: el grado I es Dm
+tap GLO
+wait 30
+expect page 11
 turn K1 2
 turn K2 1
 wait 50
 expect key 2
 expect mode 1
+tap HOME
+wait 30
 key 0 down
 wait 50
 expect mods 0
@@ -134,16 +139,14 @@ turn K2 2
 wait 30
 expect arp_mode 2
 shot arp.png
-# arpegio solo: ni pad ni bajo
+# todo suena a la vez: el pad y el bajo siguen con el arpegio (se quitan con su volumen en HOME)
 wait 800
-expect pad_on 0
-expect bass_on 0
-# K1 una más: arpegio + pad (sin bajo); dos menos: apagado
-turn K1 1
-wait 400
-expect arp 2
 expect pad_on 1
-expect bass_on 0
+expect bass_on 1
+# K1: las octavas del arpegio
+turn K1 1
+wait 30
+expect arp 1
 turn K1 -1
 tap SEL
 wait 400
@@ -487,7 +490,7 @@ tap SEL
 tap HOME
 wait 30
 expect led_fx 0
-# --- SEL: se ilumina si lo de la página suena; en el arpegiador, K1 es "con pad" ---
+# --- SEL: se ilumina si lo de la página suena ---
 tap ARP
 wait 30
 expect page 7
@@ -495,19 +498,32 @@ tap ARP
 wait 30
 expect page 1
 expect led_sel 0
-turn K1 1
-wait 30
-expect arp_pad 1
-expect arp 0
 tap SEL
 wait 30
-expect arp 2
+expect arp 1
 expect led_sel 1
 shot sel.png
 tap SEL
 wait 30
 expect arp 0
 expect led_sel 0
-turn K1 -1
 tap HOME
 wait 30
+# --- HOME: el volumen de cada capa; el pad a 0 se calla aunque suene ---
+expect page 0
+expect vol_pad 8
+expect vol_bass 6
+turn K1 -8
+wait 30
+expect vol_pad 0
+shot home.png
+key 0 down
+wait 30
+key 0 up
+wav pad0.wav
+wait 600
+wavstop
+turn K1 8
+wait 30
+expect vol_pad 8
+

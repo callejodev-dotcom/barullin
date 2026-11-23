@@ -12,7 +12,7 @@ Construido sobre [fm1-base](https://github.com/charlesvestal/fm1-base) de Charle
 | Teclas blancas 8–16 | Placa de rasgueo: cada tecla, una nota del acorde, de grave a agudo |
 | Teclas negras (mantener) | `m/M` `7` `maj7` · `sus2` `sus4` · `9` `6` `dim/aug` · `INV1` `INV2` |
 | Última tecla negra | STOP: pulsación corta para el acorde; mantenida un segundo activa o quita el HOLD (activado por defecto: el acorde sigue sonando al soltar) |
-| K1 / K2 / K3 / K4 | En la página principal: tonalidad / modo / octava / brillo del pad |
+| K1 / K2 / K3 / K4 | En la página principal (HOME): volumen del pad / del bajo / del arpegio / del rasgueo. Todo suena a la vez: lo que no quieras, a 0 |
 | PRESET | Encadenar acordes (voice leading) sí o no |
 
 ### Páginas
@@ -21,15 +21,16 @@ Los knobs K1–K4 son de la página en la que estás. Cada botón recorre sus p�
 
 | Botón | Página | SEL | K1 | K2 | K3 | K4 |
 | --- | --- | --- | --- | --- | --- | --- |
-| ARP | Arpegiador | sí / no | con pad | modo (sube, baja, sube-baja, azar) | paso (1/8, 1/8T, 1/16) | duración (octavas 1–3 en ALGORITHM) |
+| ARP | Arpegiador | sí / no | octavas (1–3) | modo (sube, baja, sube-baja, azar) | paso (1/8, 1/8T, 1/16) | duración |
 | | Bajo pulsado | sí / no | paso (1/4, 1/8, 1/8T, 1/16) | patrón (nota, octavas, quinta) | duración | octava (−1, 0, +1) |
 | FX | Delay | sí / no | tiempo al tempo (1/16–1/2) | repeticiones | mezcla | tono de las repeticiones |
 | | Reverb | sí / no | sala | tono | mezcla | ancho estéreo |
 | ENV | Pad, arpegio, bajo | — | ataque (2 ms–2 s) | caída (50 ms–3 s) | sostenido (0–100 %) | release (20 ms–4 s) |
 | LFO | Pad, arpegio, bajo | sí / no | destino (filtro/brillo, volumen, afinar, paneo) | velocidad (0,1–10 Hz) | cantidad | forma (seno, triángulo, cuadrada, azar) |
-| HOME | Principal | — | tonalidad | modo | octava | brillo |
+| GLO | Global | — | tonalidad | modo | octava | brillo del pad |
+| HOME | Principal | — | volumen pad | volumen bajo | volumen arpegio | volumen rasgueo |
 
-El arpegiador y el bajo pulsado son independientes y van a la misma rejilla del tempo. Efectos y LFO vienen apagados de serie.
+Pad, bajo, arpegio y rasgueo son capas independientes que suenan a la vez; cada una tiene su volumen en HOME. El bajo pulsado sustituye al sostenido mientras está encendido. El arpegiador y el bajo pulsado van a la misma rejilla del tempo. Efectos y LFO vienen apagados de serie.
 
 ### Más controles
 
