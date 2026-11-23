@@ -2509,14 +2509,15 @@ static void draw(void)
         int32_t x = cv_text(8, 7, &FONT_B, "BARULLIN", C_WHITE);
         if (set.hold) x = cv_text(x + 8, 9, &FONT_XS, "HOLD", C_AMB);
         key_text(t);
-        int32_t kx = 232 - text_w(&FONT_B, t);
-        cv_text(kx, 7, &FONT_B, t, C_HI);
         char bt[8];
-        int32_t bw = batt_text(bt);
-        if (bw && kx - bw - 10 > x + 6) {               /* (si cabe: con un modo largo y HOLD, no) */
+        int32_t bw = batt_text(bt), kw = text_w(&FONT_B, t);
+        if (bw && 232 - bw - 8 - kw <= x + 6) bw = 0;   /* (si no cabe con la tonalidad: con un modo largo y HOLD) */
+        int32_t kx = 232 - kw - (bw ? bw + 8 : 0);       /* la tonalidad, y a la derecha del todo la batería */
+        cv_text(kx, 7, &FONT_B, t, C_HI);
+        if (bw) {
             int16_t c = st.batt_shown, pc = c % 1000;
             uint16_t col = c >= 1000 || pc >= 30 ? RGB565(120, 235, 140) : pc >= 15 ? C_AMB : RGB565(255, 70, 60);
-            cv_text(kx - bw - 10, 11, &FONT_XS, bt, col);
+            cv_text(232 - bw, 11, &FONT_XS, bt, col);
         }
     }
     cv_rect(0, 29, 240, 1, C_LINE);
