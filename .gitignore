@@ -2,3 +2,6 @@ build/
 app/build/
 app/web/
 .venv/
+
+.plantilla_ableton
+Barullin Export/

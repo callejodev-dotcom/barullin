@@ -86,6 +86,13 @@ Sale la carpeta **Barullin Export**:
 - **Barullin.barullin**: la copia de seguridad de todo. `python3 base/tools/fm1_backup.py restore "Barullin
   Export/Barullin.barullin"` la devuelve al FM-1 (pregunta en su pantalla: SEL sí, HOME no).
 
+**Con tus sonidos** (Barullo Xuno, 7FM, Bombo… o lo que sea): en Ableton, haz un Live Set con pistas MIDI llamadas
+**Acordes**, **Bajo**, **Arpegio** y **Batería**, ponle a cada una su instrumento y sus efectos (y, si quieres, efectos
+en los retornos: Barullo Verb, Barullo Ley), y guárdalo. Luego `--plantilla RUTA/AL/SET.als` (se recuerda para las
+siguientes veces): cada proyecto sale con esas pistas tal cual, con sus sonidos, y los clips de la idea dentro. La
+batería va en notas de General MIDI (bombo C1, caja D1, charles F#1, abierto A#1): un Drum Rack con algo en esas
+casillas.
+
 `--desde FICHERO.barullin` exporta de una copia ya hecha, sin el FM-1. Hace falta un compilador de C (en el Mac,
 `xcode-select --install`), porque usa el motor de acordes del firmware tal cual.
 

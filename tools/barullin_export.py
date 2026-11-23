@@ -359,6 +359,14 @@ def write_als(path, ideas_out, tpl=None, stage=4):
     # de molde: la pista MIDI sin aparatos, si hay; el clip, el de la plantilla o el nuestro (tools/ableton/clip.xml)
     clean = [t for t in mtracks if not len(t.find("DeviceChain/DeviceChain/Devices"))]
     proto = copy.deepcopy((clean or mtracks)[0])
+    # las pistas con nombre de parte (Acordes, Bajo, Arpegio, Batería) van de molde tal cual, con sus instrumentos y
+    # efectos: tu plantilla de sonidos (Barullo Xuno, 7FM, Bombo...)
+    named = {}
+    for t in mtracks:
+        nm = (t.find("Name/UserName").get("Value") or t.find("Name/EffectiveName").get("Value") or "")
+        key = nm.strip().upper().replace("Í", "I").replace("í", "I")
+        if key in ("ACORDES", "BAJO", "ARPEGIO", "BATERIA") and key not in named:
+            named[key] = copy.deepcopy(t)
     c = proto.find(".//MidiClip")
     clip_proto = copy.deepcopy(c) if c is not None else ET.fromstring(open(os.path.join(HERE, "ableton", "clip.xml"), "rb").read())
     gs = clip_proto.find("GrooveSettings/GrooveId")
@@ -377,10 +385,14 @@ def write_als(path, ideas_out, tpl=None, stage=4):
     for ev in proto.iter("Events"):
         for e in list(ev):
             ev.remove(e)
-    for slot in proto.findall("DeviceChain/MainSequencer/ClipSlotList/ClipSlot"):
-        v = slot.find("ClipSlot/Value")
-        for e in list(v):
-            v.remove(e)
+    for tr in [proto] + list(named.values()):   # sin clips (ni en la sesión ni en el arreglo)
+        for slot in tr.findall("DeviceChain/MainSequencer/ClipSlotList/ClipSlot"):
+            v = slot.find("ClipSlot/Value")
+            for e in list(v):
+                v.remove(e)
+        for ev in tr.findall("DeviceChain/MainSequencer/Sample/ArrangerAutomation/Events"):
+            for e in list(ev):
+                ev.remove(e)
     next_id = int(ls.find("NextPointeeId").get("Value"))
     used_track_ids = {int(t.get("Id")) for t in tracks}
     tid = max(used_track_ids | {0}) + 10
@@ -390,16 +402,22 @@ def write_als(path, ideas_out, tpl=None, stage=4):
     for pi, part in enumerate(["ACORDES", "BAJO", "ARPEGIO", "BATERIA"]):
         if not any(x and x[3][part] for x in ideas_out):
             continue
-        t = copy.deepcopy(proto)
+        t = copy.deepcopy(named.get(part, proto))
         t.set("Id", str(tid))
         tid += 1
-        for e in t.iter():
+        remap = {}
+        for e in t.iter():                        # ids nuevos para todo lo que se puede automatizar o señalar...
             if e.get("Id") is not None and is_pointee(e.tag):
+                remap[e.get("Id")] = str(next_id)
                 e.set("Id", str(next_id))
                 next_id += 1
+        for e in t.iter("PointeeId"):             # ...y lo que lo señala (automatizaciones, mapeos), con ellos
+            if e.get("Value") in remap:
+                e.set("Value", remap[e.get("Value")])
         t.find("Name/EffectiveName").set("Value", part.capitalize())
         t.find("Name/UserName").set("Value", part.capitalize())
-        t.find("Color").set("Value", str(PART_COLOR[part]))
+        if part not in named:
+            t.find("Color").set("Value", str(PART_COLOR[part]))
         slots = t.findall("DeviceChain/MainSequencer/ClipSlotList/ClipSlot")
         for si, x in enumerate(ideas_out[:nslots]):
             if stage < 3 or (stage == 3 and (si or pi)):   # (diagnóstico: sin clips, o uno solo)
@@ -501,8 +519,18 @@ def main():
     ap.add_argument("--port")
     ap.add_argument("--todas", action="store_true", help="además, un proyecto con todas las ideas (una escena cada una)")
     ap.add_argument("--diagnostico", action="store_true", help="cuatro proyectos de prueba, para ver qué no le gusta a Live")
-    ap.add_argument("--plantilla", help="un Live Set vacío guardado con tu Ableton (con una pista MIDI), de molde")
+    ap.add_argument("--plantilla", help="(se recuerda para la próxima) " +"un Live Set vacío guardado con tu Ableton (con una pista MIDI), de molde")
     a = ap.parse_args()
+    remember = os.path.join(ROOT, ".plantilla_ableton")   # la última --plantilla, para no repetirla
+    if a.plantilla:
+        a.plantilla = os.path.abspath(os.path.expanduser(a.plantilla))
+        with open(remember, "w") as f:
+            f.write(a.plantilla)
+    elif os.path.exists(remember):
+        p = open(remember).read().strip()
+        if os.path.exists(p):
+            a.plantilla = p
+            print("plantilla de Ableton: " + p)
     os.makedirs(a.salida, exist_ok=True)
     bk = a.desde or os.path.join(a.salida, "Barullin.barullin")
     if not a.desde:
@@ -547,7 +575,7 @@ def main():
         for st, nm in ((1, "1 plantilla tal cual"), (2, "2 pistas sin clips"), (3, "3 un clip"), (4, "4 todo")):
             write_als(os.path.join(a.salida, "Diagnostico", nm, nm + ".als"), out, a.plantilla, st)
         print("  " + os.path.join(a.salida, "Diagnostico") + ": ábrelos en orden y dime el primero que tumba Live")
-    print("  (en Ableton, arrastra un instrumento a cada pista)")
+    print("  (las pistas sin instrumento: arrastra uno; o usa tu plantilla de sonidos con --plantilla)")
     print("hecho: " + os.path.abspath(a.salida))
 
 
