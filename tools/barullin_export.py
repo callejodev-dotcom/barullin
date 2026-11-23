@@ -331,12 +331,21 @@ def is_pointee(tag):
     return tag in POINTEE_TAGS or tag.endswith("ModulationTarget") or tag.startswith("ControllerTargets.")
 
 
-def write_als(path, ideas_out, tpl=None):
+def save_als(root, path):
+    xml = b'<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="utf-8").split(b"?>", 1)[-1].lstrip()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with gzip.open(path, "wb") as f:
+        f.write(xml)
+
+
+def write_als(path, ideas_out, tpl=None, stage=4):
     """ideas_out: lista de 8 (None o (título, tempo, compás, partes, pulsos)); tpl: un Live Set de molde (de serie,
     tools/ableton/plantilla.als; mejor uno vacío guardado con tu propio Live: --plantilla)"""
     tpl = tpl or os.path.join(HERE, "ableton", "plantilla.als")
     raw = open(tpl, "rb").read()
     root = ET.fromstring(gzip.decompress(raw) if raw[:2] == b"\x1f\x8b" else raw)
+    if stage == 1:                                # (diagnóstico: la plantilla tal cual, pasada por aquí)
+        return save_als(root, path)
     ls = root.find("LiveSet")
     tracks = ls.find("Tracks")
     mtracks = tracks.findall("MidiTrack")
@@ -388,6 +397,8 @@ def write_als(path, ideas_out, tpl=None):
         t.find("Color").set("Value", str(PART_COLOR[part]))
         slots = t.findall("DeviceChain/MainSequencer/ClipSlotList/ClipSlot")
         for si, x in enumerate(ideas_out[:nslots]):
+            if stage < 3 or (stage == 3 and (si or pi)):   # (diagnóstico: sin clips, o uno solo)
+                continue
             if not x or not x[3][part]:
                 continue
             title, tempo, ts, parts, beats = x
@@ -430,6 +441,9 @@ def write_als(path, ideas_out, tpl=None):
             clip.find("Notes/NoteIdGenerator/NextId").set("Value", str(nid))
             slots[si].find("ClipSlot/Value").append(clip)
         tracks.insert(pi, t)
+    if stage < 4:
+        ls.find("NextPointeeId").set("Value", str(next_id))
+        return save_als(root, path)
     # las escenas: una por idea, con su nombre, su tempo y su compás
     for si, sc in enumerate(scenes):
         x = ideas_out[si] if si < len(ideas_out) else None
@@ -452,10 +466,7 @@ def write_als(path, ideas_out, tpl=None):
                 for e in env.find("Automation/Events"):
                     e.set("Value", v)
     ls.find("NextPointeeId").set("Value", str(next_id))
-    xml = b'<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="utf-8")
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with gzip.open(path, "wb") as f:
-        f.write(xml)
+    save_als(root, path)
 
 
 # ---------------------------------------------------------------- leer del FM-1
@@ -483,6 +494,7 @@ def main():
     ap.add_argument("--salida", default="Barullin Export")
     ap.add_argument("--vueltas", type=int, default=1, help="cuántas veces se repite cada idea en el MIDI")
     ap.add_argument("--port")
+    ap.add_argument("--diagnostico", action="store_true", help="cuatro proyectos de prueba, para ver qué no le gusta a Live")
     ap.add_argument("--plantilla", help="un Live Set vacío guardado con tu Ableton (con una pista MIDI), de molde")
     a = ap.parse_args()
     os.makedirs(a.salida, exist_ok=True)
@@ -514,6 +526,10 @@ def main():
         raise SystemExit("no hay ideas guardadas (graba con REC y guarda con SAVE)")
     als = os.path.join(a.salida, "Barullin Project", "Barullin.als")
     write_als(als, out, a.plantilla)
+    if a.diagnostico:
+        for st, nm in ((1, "1 plantilla tal cual"), (2, "2 pistas sin clips"), (3, "3 un clip"), (4, "4 todo")):
+            write_als(os.path.join(a.salida, "Diagnostico", nm, nm + ".als"), out, a.plantilla, st)
+        print("  " + os.path.join(a.salida, "Diagnostico") + ": ábrelos en orden y dime el primero que tumba Live")
     print(f"  {als}  (una escena por idea; arrastra un instrumento a cada pista)")
     print("hecho: " + os.path.abspath(a.salida))
 
