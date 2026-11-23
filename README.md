@@ -23,15 +23,18 @@ Los knobs K1–K4 son de la página en la que estás. Cada botón recorre sus p�
 | --- | --- | --- | --- | --- | --- | --- |
 | ARP | Arpegiador | silencio rápido (a 0 y vuelta) | octavas (1–3) | modo (sube, baja, sube-baja, azar) | paso (1/8, 1/8T, 1/16) | duración (ALGORITHM: ciclo en el compás, grupos de 4, o libre) |
 | | Bajo pulsado | sí / no | paso (1/4, 1/8, 1/8T, 1/16) | patrón (nota, quinta, octava, acorde: las notas del que suena) | duración | octava (−1, 0, +1) |
-| FX | Delay | sí / no | tiempo: al tempo (1/16–1/2) o libre en ms (10–750 ms; ALGORITHM elige) | repeticiones | tono de las repeticiones | mezcla |
+| FX | Delay (a tempo, rebote estéreo) | sí / no | tiempo (1/16–1/2) | repeticiones | tono de las repeticiones | mezcla |
+| | Delay libre (en ms) | sí / no | tiempo (10–750 ms) | repeticiones | tono | mezcla |
 | | Reverb | sí / no | sala | tono | ancho estéreo | mezcla |
 | ENV | Pad, arpegio, bajo | — | ataque (2 ms–2 s) | caída (50 ms–3 s) | sostenido (0–100 %) | release (20 ms–4 s) |
-| LFO | Pad, arpegio, bajo | sí / no | destino (filtro/brillo, volumen, afinar, paneo) | velocidad (0,1–10 Hz) | cantidad | forma (seno, triángulo, cuadrada, azar) |
+| LFO | LFO 1, 2, 3 | sí / no | destino (ver abajo) | velocidad (0,1–10 Hz) | cantidad | forma (seno, triángulo, cuadrada, azar) |
 | EDIT | Ritmo | silencio rápido | bombo (a negras) | caja (en el 2 y el 4) | charles a negras | charles a corcheas |
 | GLO | Global | — | tonalidad | modo | octava | brillo del pad (ALGORITHM: encadenar acordes sí/no) |
 | HOME | Principal | — | volumen pad | volumen bajo | volumen arpegio | volumen rasgueo |
 
 Pad, bajo, arpegio y rasgueo son capas independientes que suenan a la vez; cada una tiene su volumen en HOME. El bajo pulsado sustituye al sostenido mientras está encendido. El arpegiador y el bajo pulsado van a la misma rejilla del tempo. Tocando en directo, cada acorde nuevo los arranca en el acto; con una idea sonando o grabando, van con la rejilla del compás (y si el acorde llega hasta 60 ms tarde, ese paso se repite con él). Efectos y LFO vienen apagados de serie.
+
+Los tres LFO son generales: cada uno mueve lo que le digas, y dos pueden ir al mismo sitio. Destinos: pad (filtro, volumen, afinación, paneo, desafine), arpegio (volumen, afinación, paneo, brillo, largo de las notas), bajo (volumen, afinación, brillo, largo), delay (mezcla, tiempo: efecto cinta), delay libre (tiempo), reverb (mezcla), ritmo (volumen, charles) y volumen total.
 
 ### Más controles
 
@@ -82,8 +85,8 @@ python3 base/tools/fm1_install.py app/build/barullin.fwsc         # instalar en 
 - [x] Caja de ritmos sencilla (EDIT)
 - [x] Grabar y repetir ideas (REC / PLAY)
 - [x] Reloj MIDI y start/stop
-- [x] Bajo pulsado, envolventes y LFO por sonido
-- [x] Delay de rebote al tempo y reverb
+- [x] Bajo pulsado, envolventes y tres LFO con 21 destinos
+- [x] Delay de rebote al tempo, delay libre en ms y reverb
 - [ ] Motor de pad tipo Juno (de Barullo Xuno)
 
 ## Licencia

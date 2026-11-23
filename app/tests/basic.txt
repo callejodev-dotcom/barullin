@@ -226,6 +226,9 @@ expect dly 2
 shot fx_delay.png
 tap FX
 wait 30
+expect page 13
+tap FX
+wait 30
 expect page 3
 turn K1 2
 turn K4 3
@@ -247,6 +250,9 @@ wav fx.wav
 wait 2500
 wavstop
 expect peak_db_min -30
+tap FX
+wait 30
+expect page 13
 tap FX
 wait 30
 expect page 3
@@ -395,7 +401,7 @@ tap HOME
 wait 30
 expect page 0
 # --- LFO: pad, arpegio, bajo, y vuelta (se sale con HOME); apagados de serie ---
-expect lfo_dest 0
+expect lfo_dest -1
 tap LFO
 wait 30
 expect page 8
@@ -403,7 +409,7 @@ tap SEL
 turn K1 1
 turn K3 5
 wait 30
-expect lfo_dest 2
+expect lfo_dest 1
 shot lfo.png
 key 0 down
 wait 30
@@ -418,8 +424,8 @@ expect page 9
 tap SEL
 turn K1 1
 wait 30
-expect lfo_arp 2
-expect lfo_dest 0
+expect lfo_arp 6
+expect lfo_dest -1
 tap SEL
 tap LFO
 wait 30
@@ -427,7 +433,7 @@ expect page 10
 tap SEL
 turn K1 2
 wait 30
-expect lfo_bass 3
+expect lfo_bass 12
 shot lfo_bajo.png
 tap SEL
 tap LFO
@@ -474,6 +480,9 @@ expect led_arp 0
 tap FX
 wait 30
 expect page 2
+tap FX
+wait 30
+expect page 13
 tap FX
 wait 30
 expect page 3
@@ -577,21 +586,48 @@ wait 30
 turn PRESET -1
 wait 30
 expect meter 0
-# --- delay libre: ALGORITHM en su página lo pasa a ms; el knob 1 da el tiempo ---
+# --- delay libre: su propia página (FX, la segunda), en ms; SEL lo enciende ---
 tap FX
 wait 30
 expect page 3
 tap FX
 wait 30
 expect page 2
-turn ALGO 1
+tap FX
+wait 30
+expect page 13
+expect d2_on 0
+tap SEL
 turn K1 -10
+turn K4 4
 wait 30
-expect dly_ms 200
+expect d2_on 1
+expect d2_ms 200
+expect led_fx 1
 shot delay_libre.png
-turn ALGO -1
+wav delay_libre.wav
+key 2 down
+wait 200
+key 2 up
+wait 1500
+wavstop
+expect peak_db_min -30
+tap SEL
 wait 30
-expect dly_ms -1
+expect d2_on 0
+# --- LFO a todo: el LFO 3 mueve el tiempo del delay libre, el 1 el volumen total ---
+tap LFO
+wait 30
+tap LFO
+wait 30
+tap LFO
+wait 30
+expect page 10
+tap SEL
+turn K1 4
+wait 30
+expect lfo_bass 16
+tap SEL
 tap HOME
 wait 30
 # --- caja de ritmos (EDIT): cada knob, el volumen de una parte; suena con el acorde ---

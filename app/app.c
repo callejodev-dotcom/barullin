@@ -14,18 +14,25 @@
 #define SR 44100.0f
 
 /* ------------------------------------------------------------- ajustes --- */
-#define SET_MAGIC 0x42524C47u            /* "BRLG" */
+#define SET_MAGIC 0x42524C48u            /* "BRLH" */
 #define LOOP_MAX 64                      /* cambios de acorde en una idea */
 #define LOOP_STEPS 128                   /* 16 compases de corcheas */
 typedef struct { uint8_t step; int8_t degree; uint8_t mods; uint8_t inv; } loop_ev_t;
 typedef struct {
     uint8_t on;                          /* encendido (SEL) */
-    uint8_t dest;                        /* 1 filtro (pad) / brillo (arpegio, bajo), 2 volumen, 3 afinación, 4 paneo */
+    uint8_t dest;                        /* a qué afecta: enum lfo_dest */
     uint8_t rate;                        /* 0..15: 0,1 .. 10 Hz */
     uint8_t depth;                       /* 0..10 */
     uint8_t shape;                       /* 0 seno, 1 triángulo, 2 cuadrada, 3 azar */
 } lfo_t;
-enum { LFO_PAD, LFO_ARP, LFO_BASS };
+/* Los tres LFO son generales: cada uno mueve lo que se le diga */
+enum lfo_dest {
+    D_PAD_FILT, D_PAD_VOL, D_PAD_PITCH, D_PAD_PAN, D_PAD_DET,
+    D_ARP_VOL, D_ARP_PITCH, D_ARP_PAN, D_ARP_BRIGHT, D_ARP_LEN,
+    D_BASS_VOL, D_BASS_PITCH, D_BASS_BRIGHT, D_BASS_LEN,
+    D_DLY_MIX, D_DLY_TIME, D_DL2_TIME, D_REV_MIX,
+    D_DRUM_VOL, D_HAT_VOL, D_MASTER_VOL, NDEST
+};
 #define VOL_MAX 20                       /* pasos de volumen: una vuelta de knob (20 clics) va de 0 a 100 % */
 #define VOL_UNITY 16                     /* el nivel de antes (80 %) */
 #define ARP_ON (set.vol_arp != 0)        /* el arpegio suena en cuanto tiene volumen */
@@ -69,8 +76,9 @@ typedef struct {
     int8_t bp_oct;                       /* -1..+1: la octava del bajo pulsado */
     uint8_t vol_pad, vol_bass, vol_arp, vol_strum;   /* 0..VOL_MAX: el volumen de cada capa (HOME) */
     uint8_t dly_tone;                    /* 0..9: las repeticiones, de oscuras a brillantes */
-    uint8_t dly_free;                    /* el tiempo del delay: 0 a tempo, 1 libre en ms */
-    uint16_t dly_ms;                     /* libre: 10..750 ms */
+    uint8_t d2_on;                       /* el delay libre (FX, segunda página) */
+    uint16_t d2_ms;                      /* 10..750 ms */
+    uint8_t d2_fb, d2_tone, d2_mix;
     uint8_t drm_kick, drm_snare, drm_hatq, drm_hat8;   /* caja de ritmos (EDIT): el volumen de cada parte, 0 callada */
     uint8_t drm_mute;                    /* SEL en su página: silencio (los volúmenes se guardan) */
     uint8_t rev_width;                   /* 0..10: ancho estéreo de la reverb */
@@ -109,15 +117,19 @@ static const meter_t METER[NMETER] = {
 static const char *const ARP_MODE_NAME[4] = {"SUBE", "BAJA", "S-B", "AZAR"};
 
 /* las páginas de los knobs: cada botón recorre las suyas; HOME vuelve a la principal */
-enum { PG_MAIN, PG_ARP, PG_DLY, PG_REV, PG_ENV_PAD, PG_ENV_ARP, PG_ENV_BASS, PG_BP, PG_LFO_PAD, PG_LFO_ARP, PG_LFO_BASS, PG_GLO, PG_DRUM, NPG };
+enum { PG_MAIN, PG_ARP, PG_DLY, PG_REV, PG_ENV_PAD, PG_ENV_ARP, PG_ENV_BASS, PG_BP, PG_LFO_PAD, PG_LFO_ARP, PG_LFO_BASS, PG_GLO, PG_DRUM, PG_DLY2, NPG };
 static const char *const PAGE_NAME[NPG] = {"", "ARPEGIADOR", "DELAY", "REVERB", "ENV PAD", "ENV ARP", "ENV BAJO",
-                                           "BAJO PULSADO", "LFO PAD", "LFO ARP", "LFO BAJO", "GLOBAL", "RITMO"};
+                                           "BAJO PULSADO", "LFO 1", "LFO 2", "LFO 3", "GLOBAL", "RITMO", "DELAY LIBRE"};
 static const char *const ARP_DIV_NAME[3] = {"1/8", "1/8T", "1/16"};
 static const char *const BP_DIV_NAME[4] = {"1/4", "1/8", "1/8T", "1/16"};
 static const char *const BP_PAT_NAME[4] = {"NOTA", "QUINTA", "OCTAVA", "ACORDE"};
-static const char *const LFO_DEST_NAME[5] = {"NO", "FILTRO", "VOLUMEN", "AFINAR", "PANEO"};
-static const char *const LFO_PART_NAME[3] = {"PAD", "ARP", "BAJO"};
-static const char *lfo_dest_name(int part, int d) { return d == 1 && part != LFO_PAD ? "BRILLO" : LFO_DEST_NAME[d]; }
+static const char *const LFO_DEST_NAME[NDEST] = {
+    "PAD FILTRO", "PAD VOL", "PAD AFIN", "PAD PANEO", "PAD DESAF",
+    "ARP VOL", "ARP AFIN", "ARP PANEO", "ARP BRILLO", "ARP LARGO",
+    "BAJO VOL", "BAJO AFIN", "BAJO BRILL", "BAJO LARGO",
+    "DLY MEZCLA", "DLY TIEMPO", "DL2 TIEMPO", "REV MEZCLA",
+    "RITMO VOL", "CHARLES", "TOTAL VOL"};
+static float arp_len_mul = 1.0f, bp_len_mul = 1.0f;   /* LARGO: la duración de las notas, movida por un LFO */
 static const char *const LFO_SHAPE_NAME[4] = {"SENO", "TRIANG", "CUADRA", "AZAR"};
 static float lfo_hz(int r) { return 0.1f * fm_exp2f((float)r * (6.6439f / 15.0f)); }   /* 0,1 .. 10 Hz */
 static const char *const DLY_DIV_NAME[6] = {"1/16", "1/8", "1/8.", "1/4", "1/4.", "1/2"};
@@ -267,8 +279,8 @@ static void take_chord(const snd_chord *c)
             pad[best].note = c->notes[i];
             pad[best].gate = 1;
             pad[best].stage = 0;
-            pad[best].i1 = note_inc(c->notes[i]) * 1.0040f;   /* +7 cents */
-            pad[best].i2 = note_inc(c->notes[i]) * 0.9960f;   /* -7 cents */
+            pad[best].i1 = note_inc(c->notes[i]);   /* (las dos sierras se desafinan en el render: det) */
+            pad[best].i2 = pad[best].i1;
             used[best] = 1;
         }
     {
@@ -301,6 +313,10 @@ static void take_plucks(void)
 static int16_t dly_buf[2][DLY_MAX] PLAT_POOL;
 static uint32_t dly_w;
 static float dly_lp[2];
+/* el delay libre: mono (0,75 s), su propio tiempo en ms, repeticiones, tono y mezcla */
+static int16_t dl2_buf[DLY_MAX] PLAT_POOL;
+static uint32_t dl2_w;
+static float dl2_cur = 13230.0f, dl2_lp;
 static float dly_cur = 11025.0f;         /* el tiempo actual, en muestras (se desliza hacia el pedido) */
 #define NCOMB 4
 #define NAP 2
@@ -314,8 +330,7 @@ static float rv_fb = 0.84f, rv_tone = 0.8f;   /* del bloque: tamaño y tono */
 
 static float dly_target(void)
 {
-    float d = set.dly_free ? SR * (float)set.dly_ms / 1000.0f
-                           : SR * 60.0f / (float)set.tempo * DLY_BEATS[set.dly_div % 6u];
+    float d = SR * 60.0f / (float)set.tempo * DLY_BEATS[set.dly_div % 6u];
     return d > (float)(DLY_MAX - 2) ? (float)(DLY_MAX - 2) : d;
 }
 
@@ -396,7 +411,7 @@ static void drum_step(uint32_t s)
     drum_hit(2, hat);
 }
 
-static inline float drum_sample(void)
+static inline float drum_sample(float g_hat)
 {
     float out = 0.0f, n;
     d_rng = d_rng * 1664525u + 1013904223u;
@@ -430,7 +445,7 @@ static inline float drum_sample(void)
     if (dh_env > 0.0005f) {
         float hp = n - dh_prev;              /* ruido brillante */
         dh_prev = n;
-        out += hp * dh_env * dh_amp * 0.16f;
+        out += hp * dh_env * dh_amp * 0.16f * g_hat;
         dh_env *= 0.9965f;                   /* ~6 ms: cerrado */
     }
     return out;
@@ -528,7 +543,7 @@ static void arp_fire(float step, uint32_t idx)
     note = set.arp_free ? arp_note(arp_i) : arp_note_bar(idx);
     arp_i++;
     if (note < 0) return;
-    arp_voice(note, 0, step, set.arp_len);
+    arp_voice(note, 0, step * arp_len_mul, set.arp_len);
     arp_steps++;
 }
 
@@ -568,15 +583,18 @@ static void bp_fire(float step, uint32_t idx)
     }
     bp_i++;
     note += 12 * set.bp_oct;
-    arp_voice(clamp(note, 0, 127), 1, step, set.bp_len);
+    arp_voice(clamp(note, 0, 127), 1, step * bp_len_mul, set.bp_len);
 }
 
 static float e_att, e_dec, e_rel, e_sus;
-static float lfo_ph[3], trem_now[3] = {1.0f, 1.0f, 1.0f}, pan_now[3];
+static float lfo_ph[3];
+/* volúmenes y paneos que mueven los LFO, suavizados por muestra: pad, arpegio, bajo, batería, charles, total */
+enum { SM_PAD, SM_ARP, SM_BASS, SM_DRUM, SM_HAT, SM_MASTER, NSM };
+static float trem_now[NSM] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f}, pan_now[3];
 static uint32_t lfo_rng[3] = {0x2468ACEu, 0x13579BDu, 0x0F1E2D3u};
 
 /* lo que cada LFO pide este bloque: afinación, volumen, paneo y brillo de su sonido */
-typedef struct { float pitch, trem, pan, harm; } lfo_out_t;
+
 static float lfo_step(int k, uint32_t n)       /* avanza el LFO k un bloque; su valor, -1..1 */
 {
     const lfo_t *L = &set.lfo[k];
@@ -599,31 +617,56 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     uint32_t i, seq = snd_seq;
     int j;
     float cut = snd_cut;
-    lfo_out_t lo[3];
+    float M[NDEST], D[NDEST];              /* lo que pide cada destino este bloque: modulación y cuánta como mucho */
+    float trem_t[NSM], pan_t[3], pitch_pad, pitch_arp, pitch_bass, det;
     {
         int k;
+        for (k = 0; k < NDEST; k++) M[k] = D[k] = 0.0f;
         for (k = 0; k < 3; k++) {
             const lfo_t *L = &set.lfo[k];
-            lo[k].pitch = 1.0f; lo[k].trem = 1.0f; lo[k].pan = 0.0f; lo[k].harm = 0.0f;
-            if (L->on && L->dest && L->depth) {
-                float v = lfo_step(k, n), depth = (float)L->depth / 10.0f;
-                if (L->dest == 1) {
-                    if (k == LFO_PAD) {      /* filtro: hasta dos octavas arriba y abajo */
-                        float fc = 300.0f * fm_exp2f((float)set.bright * 0.25f + v * depth * 2.0f);
-                        if (fc > 16000.0f) fc = 16000.0f;
-                        cut = 1.0f - fm_expf(-6.2831853f * fc / SR);
-                    } else lo[k].harm = v * depth;                                     /* brillo: armónicos */
-                } else if (L->dest == 2) lo[k].trem = 1.0f - depth * (0.5f - 0.5f * v);   /* volumen */
-                else if (L->dest == 3) lo[k].pitch = fm_exp2f(v * depth * 0.5f / 12.0f);  /* hasta medio tono */
-                else lo[k].pan = v * depth;                                              /* paneo */
+            if (L->on && L->depth && L->dest < NDEST) {
+                float depth = (float)L->depth / 10.0f;
+                M[L->dest] += lfo_step(k, n) * depth;
+                D[L->dest] += depth;
             }
         }
+        if (D[D_PAD_FILT] > 0.0f) {          /* filtro del pad: hasta dos octavas arriba y abajo */
+            float fc = 300.0f * fm_exp2f((float)set.bright * 0.25f + M[D_PAD_FILT] * 2.0f);
+            if (fc > 16000.0f) fc = 16000.0f;
+            cut = 1.0f - fm_expf(-6.2831853f * fc / SR);
+        }
+        /* volumen: baja desde arriba (1 - cantidad .. 1) */
+        trem_t[SM_PAD] = 1.0f + 0.5f * M[D_PAD_VOL] - 0.5f * D[D_PAD_VOL];
+        trem_t[SM_ARP] = 1.0f + 0.5f * M[D_ARP_VOL] - 0.5f * D[D_ARP_VOL];
+        trem_t[SM_BASS] = 1.0f + 0.5f * M[D_BASS_VOL] - 0.5f * D[D_BASS_VOL];
+        trem_t[SM_DRUM] = 1.0f + 0.5f * M[D_DRUM_VOL] - 0.5f * D[D_DRUM_VOL];
+        trem_t[SM_HAT] = 1.0f + 0.5f * M[D_HAT_VOL] - 0.5f * D[D_HAT_VOL];
+        trem_t[SM_MASTER] = 1.0f + 0.5f * M[D_MASTER_VOL] - 0.5f * D[D_MASTER_VOL];
+        for (k = 0; k < NSM; k++) if (trem_t[k] < 0.0f) trem_t[k] = 0.0f;
+        pan_t[0] = fm_clampf(M[D_PAD_PAN], -1.0f, 1.0f);
+        pan_t[1] = fm_clampf(M[D_ARP_PAN], -1.0f, 1.0f);
+        pan_t[2] = 0.0f;
+        pitch_pad = D[D_PAD_PITCH] > 0.0f ? fm_exp2f(M[D_PAD_PITCH] * 0.5f / 12.0f) : 1.0f;   /* hasta medio tono */
+        pitch_arp = D[D_ARP_PITCH] > 0.0f ? fm_exp2f(M[D_ARP_PITCH] * 0.5f / 12.0f) : 1.0f;
+        pitch_bass = D[D_BASS_PITCH] > 0.0f ? fm_exp2f(M[D_BASS_PITCH] * 0.5f / 12.0f) : 1.0f;
+        det = fm_clampf(0.004f * (1.0f + M[D_PAD_DET]), 0.0f, 0.012f);   /* desafine del pad: de 0 a ~20 cents */
+        arp_len_mul = fm_clampf(1.0f + 0.8f * M[D_ARP_LEN], 0.15f, 1.9f);
+        bp_len_mul = fm_clampf(1.0f + 0.8f * M[D_BASS_LEN], 0.15f, 1.9f);
     }
-    float pitch_mul = lo[LFO_PAD].pitch;
-    float harm_a = 0.35f * (1.0f + lo[LFO_ARP].harm), harm_b = 0.25f * (1.0f + lo[LFO_BASS].harm);   /* un poco de segundo armónico: la nota se entiende en cualquier altavoz */
+    float pm1 = pitch_pad * (1.0f + det), pm2 = pitch_pad * (1.0f - det);   /* las dos sierras del pad */
+    float padL = 1.0f, padR = 1.0f, arpL = 0.0f, arpR = 0.0f, bassG = 0.0f, drumG = 1.0f, hatG = 1.0f, outG = 0.0f;
+    float harm_a = fm_maxf(0.0f, 0.35f * (1.0f + M[D_ARP_BRIGHT])), harm_b = fm_maxf(0.0f, 0.25f * (1.0f + M[D_BASS_BRIGHT]));
     float gain = (float)master_q12 / 4096.0f * 7000000.0f;
-    float dmix = set.dly_on ? (float)set.dly_mix * 0.07f : 0.0f, dfb = set.dly_on ? (float)set.dly_fb * 0.09f : 0.0f;
-    float rmix = set.rev_on ? (float)set.rev_mix * 0.12f : 0.0f, dtarget = dly_target();
+    float dmix = set.dly_on ? fm_maxf(0.0f, (float)set.dly_mix * 0.07f * (1.0f + M[D_DLY_MIX])) : 0.0f;
+    float dfb = set.dly_on ? (float)set.dly_fb * 0.09f : 0.0f;
+    float rmix = set.rev_on ? fm_maxf(0.0f, (float)set.rev_mix * 0.12f * (1.0f + M[D_REV_MIX])) : 0.0f;
+    float dtarget = dly_target() * (1.0f + 0.04f * M[D_DLY_TIME]);   /* el tiempo, movido: efecto de cinta */
+    float d2mix = set.d2_on ? (float)set.d2_mix * 0.07f : 0.0f, d2fb = set.d2_on ? (float)set.d2_fb * 0.09f : 0.0f;
+    float d2target = fm_minf(SR * (float)set.d2_ms / 1000.0f * (1.0f + 0.04f * M[D_DL2_TIME]), (float)(DLY_MAX - 2));
+    float d2tone = 0.15f + (float)set.d2_tone * 0.094f;
+    int d2still = D[D_DL2_TIME] <= 0.0f && fm_fabsf(d2target - dl2_cur) < 0.5f;
+    int32_t d2int = (int32_t)(dl2_cur + 0.5f);
+    float dglide = (D[D_DLY_TIME] > 0.0f || D[D_DL2_TIME] > 0.0f) ? 0.002f : 0.0002f;
     float binc = (float)set.tempo / 60.0f / SR;   /* pulsos por muestra */
     float dtone = 0.15f + (float)set.dly_tone * 0.094f, rwid = (float)set.rev_width / 10.0f;
     /* los volúmenes de HOME: 8 es el nivel de antes (el bajo, de serie en 6: tapaba al pad) */
@@ -734,28 +777,34 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
                 else v->env = e_sus + (v->env - e_sus) * e_dec;
             } else if (v->env > 0.0f) { v->env *= e_rel; if (v->env < 0.0001f) v->env = 0.0f; }
             if (v->env == 0.0f) continue;
-            v->p1 += v->i1 * pitch_mul; if (v->p1 >= 1.0f) v->p1 -= 1.0f;
-            v->p2 += v->i2 * pitch_mul; if (v->p2 >= 1.0f) v->p2 -= 1.0f;
+            v->p1 += v->i1 * pm1; if (v->p1 >= 1.0f) v->p1 -= 1.0f;
+            v->p2 += v->i2 * pm2; if (v->p2 >= 1.0f) v->p2 -= 1.0f;
             l += (2.0f * v->p1 - 1.0f) * v->env * g_pad;
             r += (2.0f * v->p2 - 1.0f) * v->env * g_pad;
         }
         /* filtro paso bajo de dos polos por canal: el pad, tibio */
         lp1[0] += (l - lp1[0]) * cut; lp2[0] += (lp1[0] - lp2[0]) * cut;
         lp1[1] += (r - lp1[1]) * cut; lp2[1] += (lp1[1] - lp2[1]) * cut;
-        {   /* volumen y paneo de cada LFO, sin escalones */
+        if ((i & 7u) == 0) {   /* volumen y paneo de cada LFO, sin escalones (cada 8 muestras basta) */
             int k;
-            for (k = 0; k < 3; k++) {
-                trem_now[k] += (lo[k].trem - trem_now[k]) * 0.002f;
-                pan_now[k] += (lo[k].pan - pan_now[k]) * 0.002f;
-            }
+            for (k = 0; k < NSM; k++) trem_now[k] += (trem_t[k] - trem_now[k]) * 0.016f;
+            for (k = 0; k < 2; k++) pan_now[k] += (pan_t[k] - pan_now[k]) * 0.016f;
+            padL = trem_now[SM_PAD] * (pan_now[0] > 0.0f ? 1.0f - pan_now[0] : 1.0f);
+            padR = trem_now[SM_PAD] * (pan_now[0] < 0.0f ? 1.0f + pan_now[0] : 1.0f);
+            arpL = trem_now[SM_ARP] * g_arp * 1.1f * (pan_now[1] > 0.0f ? 1.0f - pan_now[1] : 1.0f);
+            arpR = trem_now[SM_ARP] * g_arp * 0.9f * (pan_now[1] < 0.0f ? 1.0f + pan_now[1] : 1.0f);
+            bassG = trem_now[SM_BASS] * g_bass;
+            drumG = trem_now[SM_DRUM];
+            hatG = trem_now[SM_HAT];
+            outG = trem_now[SM_MASTER];
         }
-        l = lp2[0] * trem_now[0] * (pan_now[0] > 0.0f ? 1.0f - pan_now[0] : 1.0f);
-        r = lp2[1] * trem_now[0] * (pan_now[0] < 0.0f ? 1.0f + pan_now[0] : 1.0f);
+        l = lp2[0] * padL;
+        r = lp2[1] * padR;
         /* rasgueos: seno con algo de segundo armónico, que se apaga solo */
         for (j = 0; j < NPLK; j++) {
             plk_v *p = &plk[j];
             if (p->env < 0.0005f && p->left <= 0) continue;
-            p->ph += p->inc * (p->left < 0 ? 1.0f : p->low ? lo[LFO_BASS].pitch : lo[LFO_ARP].pitch);
+            p->ph += p->inc * (p->left < 0 ? 1.0f : p->low ? pitch_bass : pitch_arp);
             if (p->ph >= 1.0f) p->ph -= 1.0f;
             if (p->left < 0) p->env *= 0.99990f;            /* rasgueo: se apaga solo */
             else if (p->left > 0) {                           /* arpegio: su envolvente mientras dura el paso */
@@ -772,15 +821,15 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
                 s = (tsin(p->ph) + 0.35f * tsin2(p->ph)) * p->env * p->amp * g_strum;
                 l += s * 1.1f; r += s * 0.9f;
             } else {                                          /* arpegio: con su LFO */
-                s = (tsin(p->ph) + harm_a * tsin2(p->ph)) * p->env * p->amp * trem_now[1] * g_arp;
-                l += s * 1.1f * (pan_now[1] > 0.0f ? 1.0f - pan_now[1] : 1.0f);
-                r += s * 0.9f * (pan_now[1] < 0.0f ? 1.0f + pan_now[1] : 1.0f);
+                s = (tsin(p->ph) + harm_a * tsin2(p->ph)) * p->env * p->amp;
+                l += s * arpL;
+                r += s * arpR;
             }
         }
         /* efectos: delay de rebote y reverb, sobre el pad, el rasgueo y el arpegio */
         if (dmix > 0.0f || dfb > 0.0f) {
             float yl, yr;
-            dly_cur += (dtarget - dly_cur) * 0.0002f;
+            dly_cur += (dtarget - dly_cur) * dglide;
             yl = dly_read(0, dly_cur);
             yr = dly_read(1, dly_cur);
             dly_lp[0] += (yr - dly_lp[0]) * dtone;   /* las repeticiones se oscurecen según el tono */
@@ -791,33 +840,59 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             l += yl * dmix;
             r += yr * dmix;
         }
+        if (d2mix > 0.0f || d2fb > 0.0f) {   /* el delay libre */
+            float y;
+            if (d2still) {                   /* tiempo quieto: lectura directa */
+                int32_t i0 = (int32_t)dl2_w - d2int;
+                if (i0 < 0) i0 += DLY_MAX;
+                y = (float)dl2_buf[i0] * (1.0f / 32767.0f);
+            } else {                         /* tiempo moviéndose: interpola */
+                float pos = (float)dl2_w - dl2_cur, fr;
+                int32_t i0, i1;
+                dl2_cur += (d2target - dl2_cur) * dglide;
+                if (pos < 0.0f) pos += (float)DLY_MAX;
+                i0 = (int32_t)pos;
+                if (i0 >= DLY_MAX) i0 = DLY_MAX - 1;
+                fr = pos - (float)i0;
+                i1 = i0 + 1 >= DLY_MAX ? 0 : i0 + 1;
+                y = ((float)dl2_buf[i0] * (1.0f - fr) + (float)dl2_buf[i1] * fr) * (1.0f / 32767.0f);
+            }
+            dl2_lp += (y - dl2_lp) * d2tone;
+            dl2_buf[dl2_w] = sat16((l + r) * 0.5f + dl2_lp * d2fb);
+            if (++dl2_w >= DLY_MAX) dl2_w = 0;
+            l += y * d2mix;
+            r += y * d2mix;
+        }
         if (rmix > 0.0f) {
             float in = (l + r) * 0.03f, rl = reverb_ch(0, in), rr = reverb_ch(1, in);
             l += (rl * (1.0f + rwid) + rr * (1.0f - rwid)) * 0.5f * rmix;   /* ancho: de mono a todo estéreo */
             r += (rr * (1.0f + rwid) + rl * (1.0f - rwid)) * 0.5f * rmix;
         }
-        lowsum *= trem_now[2] * g_bass;      /* el bajo pulsado, seco, con su LFO y su volumen */
-        l += lowsum * (pan_now[2] > 0.0f ? 1.0f - pan_now[2] : 1.0f);
-        r += lowsum * (pan_now[2] < 0.0f ? 1.0f + pan_now[2] : 1.0f);
+        lowsum *= bassG;                     /* el bajo pulsado, seco, con su LFO y su volumen */
+        l += lowsum;
+        r += lowsum;
         /* bajo: un seno, seco */
         if (bass_gate) {
             if (bass_stage == 0) { bass_env += be_att; if (bass_env >= 1.0f) { bass_env = 1.0f; bass_stage = 1; } }
             else bass_env = be_sus + (bass_env - be_sus) * be_dec;
         } else bass_env *= be_rel;
         if (bass_env > 0.0001f) {
-            bass_ph += bass_inc * lo[LFO_BASS].pitch; if (bass_ph >= 1.0f) bass_ph -= 1.0f;
-            b = (tsin(bass_ph) + (harm_b != 0.0f ? harm_b * tsin2(bass_ph) : 0.0f)) * bass_env * 0.30f * trem_now[2] * g_bass;
-            l += b * (pan_now[2] > 0.0f ? 1.0f - pan_now[2] : 1.0f);
-            r += b * (pan_now[2] < 0.0f ? 1.0f + pan_now[2] : 1.0f);
+            bass_ph += bass_inc * pitch_bass; if (bass_ph >= 1.0f) bass_ph -= 1.0f;
+            b = (tsin(bass_ph) + (harm_b != 0.0f ? harm_b * tsin2(bass_ph) : 0.0f)) * bass_env * 0.30f * bassG;
+            l += b;
+            r += b;
         }
         gain_now += (gain - gain_now) * 0.004f;
+        {
+            float g = gain_now * outG;
         {   /* la batería, seca y al centro */
-            float d = drum_sample();
+            float d = drum_sample(hatG) * drumG;
             l += d;
             r += d;
         }
-        lr[2 * i] = (int32_t)(soft_clip(l) * gain_now);
-        lr[2 * i + 1] = (int32_t)(soft_clip(r) * gain_now);
+        lr[2 * i] = (int32_t)(soft_clip(l) * g);
+        lr[2 * i + 1] = (int32_t)(soft_clip(r) * g);
+        }
     }
     tp_beats = (float)tp_bint + tp_bfrac;    /* para el UI: dónde va el reloj */
 }
@@ -912,8 +987,11 @@ static void settings_defaults(void)
     set.vol_arp = 0;                         /* el arpegio, callado hasta que se le sube */
     set.vol_strum = VOL_UNITY;
     set.dly_tone = 7;
-    set.dly_free = 0;
-    set.dly_ms = 300;
+    set.d2_on = 0;
+    set.d2_ms = 300;
+    set.d2_fb = 3;
+    set.d2_tone = 6;
+    set.d2_mix = 3;
     set.drm_kick = set.drm_snare = set.drm_hatq = set.drm_hat8 = 0;
     set.drm_mute = 0;
     set.rev_width = 10;
@@ -921,7 +999,7 @@ static void settings_defaults(void)
         int k;
         for (k = 0; k < 3; k++) {            /* los LFO, apagados de serie */
             set.lfo[k].on = 0;
-            set.lfo[k].dest = 1;
+            set.lfo[k].dest = k == 0 ? D_PAD_FILT : k == 1 ? D_ARP_VOL : D_BASS_VOL;
             set.lfo[k].rate = 6;
             set.lfo[k].depth = 5;
             set.lfo[k].shape = 0;
@@ -942,7 +1020,7 @@ static int lfos_ok(void)
 {
     int k;
     for (k = 0; k < 3; k++)
-        if (set.lfo[k].on > 1u || set.lfo[k].dest < 1u || set.lfo[k].dest > 4u || set.lfo[k].rate > 15u || set.lfo[k].depth > 10u || set.lfo[k].shape > 3u) return 0;
+        if (set.lfo[k].on > 1u || set.lfo[k].dest >= NDEST || set.lfo[k].rate > 15u || set.lfo[k].depth > 10u || set.lfo[k].shape > 3u) return 0;
     return 1;
 }
 
@@ -967,7 +1045,8 @@ static void settings_load(void)
         || set.dly_on > 1u || set.rev_on > 1u || set.rev_size > 9u || set.rev_tone > 9u
         || set.env_a > 9u || set.env_d > 9u || set.env_s > 10u || set.env_r > 9u
         || set.aenv_a > 9u || set.aenv_d > 9u || set.aenv_s > 10u || set.aenv_r > 9u || set.bp_on > 1u || set.bp_div > 3u || set.bp_pat > 3u || set.bp_len < 1u || set.bp_len > 9u || set.bp_oct < -1 || set.bp_oct > 1
-        || set.vol_pad > VOL_MAX || set.vol_bass > VOL_MAX || set.vol_arp > VOL_MAX || set.vol_strum > VOL_MAX || set.dly_tone > 9u || set.dly_free > 1u || set.dly_ms < 10u || set.dly_ms > 750u || set.drm_kick > VOL_MAX || set.drm_snare > VOL_MAX
+        || set.vol_pad > VOL_MAX || set.vol_bass > VOL_MAX || set.vol_arp > VOL_MAX || set.vol_strum > VOL_MAX || set.dly_tone > 9u || set.d2_on > 1u || set.d2_ms < 10u || set.d2_ms > 750u
+        || set.d2_fb > 9u || set.d2_tone > 9u || set.d2_mix > 10u || set.drm_kick > VOL_MAX || set.drm_snare > VOL_MAX
         || set.drm_hatq > VOL_MAX || set.drm_hat8 > VOL_MAX || set.drm_mute > 1u || set.rev_width > 10u
         || !lfos_ok()
         || set.benv_a > 9u || set.benv_d > 9u || set.benv_s > 10u || set.benv_r > 9u
@@ -1149,9 +1228,10 @@ static const char *page_state(int pg)    /* lo que se dice al entrar: si está e
     case PG_BP: return set.bp_on ? "SI" : "NO";
     case PG_DLY: return set.dly_on ? "SI" : "NO";
     case PG_REV: return set.rev_on ? "SI" : "NO";
+    case PG_DLY2: return set.d2_on ? "SI" : "NO";
     case PG_DRUM: return set.drm_mute ? "SILENCIO" : DRUM_ON ? "SI" : "SUBE UN VOLUMEN";
     case PG_LFO_PAD: case PG_LFO_ARP: case PG_LFO_BASS:
-        return set.lfo[pg - PG_LFO_PAD].on ? lfo_dest_name(pg - PG_LFO_PAD, set.lfo[pg - PG_LFO_PAD].dest) : "NO";
+        return set.lfo[pg - PG_LFO_PAD].on ? LFO_DEST_NAME[set.lfo[pg - PG_LFO_PAD].dest % NDEST] : "NO";
     default: return "";
     }
 }
@@ -1164,6 +1244,7 @@ static int page_active(int pg)
     case PG_BP: return set.bp_on != 0;
     case PG_DLY: return set.dly_on != 0;
     case PG_REV: return set.rev_on != 0;
+    case PG_DLY2: return set.d2_on != 0;
     case PG_LFO_PAD: case PG_LFO_ARP: case PG_LFO_BASS: return set.lfo[pg - PG_LFO_PAD].on != 0;
     case PG_DRUM: return DRUM_ON;
     default: return 0;
@@ -1188,6 +1269,10 @@ static void sel_toggle(void)
         set.dly_on = !set.dly_on;
         break;
     case PG_REV: set.rev_on = !set.rev_on; break;
+    case PG_DLY2:
+        if (!set.d2_on) { uint32_t z; for (z = 0; z < DLY_MAX; z++) dl2_buf[z] = 0; }   /* sin ecos viejos */
+        set.d2_on = !set.d2_on;
+        break;
     case PG_LFO_PAD: case PG_LFO_ARP: case PG_LFO_BASS: set.lfo[pg - PG_LFO_PAD].on = !set.lfo[pg - PG_LFO_PAD].on; break;
     case PG_DRUM: set.drm_mute = !set.drm_mute; break;
     case PG_ENV_PAD: case PG_ENV_ARP: case PG_ENV_BASS: app_say("ENVOLVENTE", "SIEMPRE ACTIVA"); return;
@@ -1436,8 +1521,8 @@ static void input(void)
             static const uint8_t P[2] = {PG_ARP, PG_BP};
             page_go(P, 2, &st.mem_arp);
         } else if (k == B_FX) {              /* delay, reverb */
-            static const uint8_t P[2] = {PG_DLY, PG_REV};
-            page_go(P, 2, &st.mem_fx);
+            static const uint8_t P[3] = {PG_DLY, PG_DLY2, PG_REV};
+            page_go(P, 3, &st.mem_fx);
         } else if (k == B_ENV) {             /* envolventes: pad, arpegio, bajo */
             static const uint8_t P[3] = {PG_ENV_PAD, PG_ENV_ARP, PG_ENV_BASS};
             page_go(P, 3, &st.mem_env);
@@ -1482,20 +1567,31 @@ static void input(void)
                 int_text(set.arp_len * 10, t); text_cat(t, "%");
                 set_changed("ARP LARGO", t);
             }
-        } else if (st.page == PG_DLY && k == EN_ALGO) {   /* DELAY: a tempo o libre, en ALGORITHM */
-            set.dly_free = e > 0;
-            set_changed("DELAY", set.dly_free ? "LIBRE (MS)" : "A TEMPO");
-        } else if (st.page == PG_DLY && k >= EN_K1) {   /* DELAY (SEL lo enciende) */
-            if (k == EN_K1 && set.dly_free) {    /* libre: en ms, pasos finos abajo y más gordos arriba */
-                int32_t ms = set.dly_ms, d;
+        } else if (st.page == PG_DLY2 && k >= EN_K1) {   /* DELAY LIBRE (SEL lo enciende) */
+            if (k == EN_K1) {                /* el tiempo en ms: pasos finos abajo y más gordos arriba */
+                int32_t ms = set.d2_ms, d;
                 for (d = 0; d < (e < 0 ? -e : e); d++) {
                     int32_t st_ = e > 0 ? (ms < 100 ? 5 : ms < 300 ? 10 : 25) : (ms <= 100 ? 5 : ms <= 300 ? 10 : 25);
                     ms = clamp(ms + (e > 0 ? st_ : -st_), 10, 750);
                 }
-                set.dly_ms = (uint16_t)ms;
+                set.d2_ms = (uint16_t)ms;
                 int_text(ms, t); text_cat(t, " MS");
-                set_changed("DELAY TIEMPO", t);
-            } else if (k == EN_K1) {
+                set_changed("DELAY LIBRE", t);
+            } else if (k == EN_K2) {
+                set.d2_fb = (uint8_t)clamp((int32_t)set.d2_fb + e, 0, 9);
+                int_text(set.d2_fb * 10, t); text_cat(t, "%");
+                set_changed("REPETICIONES", t);
+            } else if (k == EN_K3) {
+                set.d2_tone = (uint8_t)clamp((int32_t)set.d2_tone + e, 0, 9);
+                int_text(set.d2_tone + 1, t);
+                set_changed("DELAY LIBRE TONO", t);
+            } else {
+                set.d2_mix = (uint8_t)clamp((int32_t)set.d2_mix + e, 0, 10);
+                int_text(set.d2_mix * 10, t); text_cat(t, "%");
+                set_changed("DELAY LIBRE MEZCLA", t);
+            }
+        } else if (st.page == PG_DLY && k >= EN_K1) {   /* DELAY (SEL lo enciende) */
+            if (k == EN_K1) {
                 set.dly_div = (uint8_t)clamp((int32_t)set.dly_div + e, 0, 5);
                 set_changed("DELAY TIEMPO", DLY_DIV_NAME[set.dly_div]);
             } else if (k == EN_K2) {
@@ -1555,9 +1651,10 @@ static void input(void)
         } else if (st.page >= PG_LFO_PAD && st.page <= PG_LFO_BASS && k >= EN_K1) {   /* LFO (SEL lo enciende) */
             int part = st.page - PG_LFO_PAD;
             lfo_t *L = &set.lfo[part];
+            (void)part;
             if (k == EN_K1) {
-                L->dest = (uint8_t)clamp((int32_t)L->dest + e, 1, 4);
-                set_changed("LFO DESTINO", lfo_dest_name(part, L->dest));
+                L->dest = (uint8_t)clamp((int32_t)L->dest + e, 0, NDEST - 1);
+                set_changed("LFO DESTINO", LFO_DEST_NAME[L->dest]);
             } else if (k == EN_K2) {
                 L->rate = (uint8_t)clamp((int32_t)L->rate + e, 0, 15);
                 hz_text(lfo_hz(L->rate), t);
@@ -1636,11 +1733,11 @@ static void input(void)
     plat_glow(1);
     {
         /* cada botón, encendido mientras algo de su sección suena, o mientras se está en una de sus páginas */
-        int arp_on = ARP_ON || set.bp_on, fx_on = set.dly_on || set.rev_on;
+        int arp_on = ARP_ON || set.bp_on, fx_on = set.dly_on || set.rev_on || set.d2_on;
         int lfo_on = set.lfo[0].on || set.lfo[1].on || set.lfo[2].on;
         uint32_t lit = btn | (set_dirty ? 1u << B_SAVE : 0u)
                        | (arp_on || st.page == PG_ARP || st.page == PG_BP ? 1u << B_ARP : 0u)
-                       | (fx_on || st.page == PG_DLY || st.page == PG_REV ? 1u << B_FX : 0u)
+                       | (fx_on || st.page == PG_DLY || st.page == PG_DLY2 || st.page == PG_REV ? 1u << B_FX : 0u)
                        | (st.page >= PG_ENV_PAD && st.page <= PG_ENV_BASS ? 1u << B_ENV : 0u)
                        | (lfo_on || (st.page >= PG_LFO_PAD && st.page <= PG_LFO_BASS) ? 1u << B_LFO : 0u)
                        | (st.page == PG_MAIN ? 1u << B_HOME : 0u) | (st.page == PG_GLO ? 1u << B_GLO : 0u)
@@ -1791,7 +1888,7 @@ static void draw(void)
         for (i = 0; i < 4; i++) v[i][0] = 0;
         text_cat(head, PAGE_NAME[pg]);
         if (pg == PG_ARP || pg == PG_BP || pg == PG_DLY || pg == PG_REV || (pg >= PG_LFO_PAD && pg <= PG_LFO_BASS)
-            || pg == PG_DRUM) {
+            || pg == PG_DRUM || pg == PG_DLY2) {
             text_cat(head, page_active(pg) ? "  SEL: SI" : "  SEL: NO");
         }
         if (pg == PG_ARP) {
@@ -1822,12 +1919,16 @@ static void draw(void)
             int_text(set.bp_oct, v[3]);
         } else if (pg == PG_DLY) {
             lbl[0] = "TIEMPO"; lbl[1] = "REPETIR"; lbl[2] = "TONO"; lbl[3] = "MEZCLA";
-            if (set.dly_free) { int_text(set.dly_ms, v[0]); text_cat(v[0], "ms"); }
-            else text_cat(v[0], DLY_DIV_NAME[set.dly_div]);
-            text_cat(head, set.dly_free ? "  LIBRE" : "  A TEMPO");
+            text_cat(v[0], DLY_DIV_NAME[set.dly_div]);
             int_text(set.dly_fb * 10, v[1]); text_cat(v[1], "%");
             int_text(set.dly_tone + 1, v[2]);
             int_text(set.dly_mix * 10, v[3]); text_cat(v[3], "%");
+        } else if (pg == PG_DLY2) {
+            lbl[0] = "TIEMPO"; lbl[1] = "REPETIR"; lbl[2] = "TONO"; lbl[3] = "MEZCLA";
+            int_text(set.d2_ms, v[0]); text_cat(v[0], "ms");
+            int_text(set.d2_fb * 10, v[1]); text_cat(v[1], "%");
+            int_text(set.d2_tone + 1, v[2]);
+            int_text(set.d2_mix * 10, v[3]); text_cat(v[3], "%");
         } else if (pg == PG_REV) {
             lbl[0] = "SALA"; lbl[1] = "TONO"; lbl[2] = "ANCHO"; lbl[3] = "MEZCLA";
             int_text(set.rev_size + 1, v[0]);
@@ -1848,7 +1949,8 @@ static void draw(void)
             int part = pg - PG_LFO_PAD;
             const lfo_t *L = &set.lfo[part];
             lbl[0] = "DESTINO"; lbl[1] = "VELOCIDAD"; lbl[2] = "CANTIDAD"; lbl[3] = "FORMA";
-            text_cat(v[0], lfo_dest_name(part, L->dest));
+            (void)part;
+            text_cat(v[0], LFO_DEST_NAME[L->dest % NDEST]);
             hz_text(lfo_hz(L->rate), v[1]);
             int_text(L->depth * 10, v[2]); text_cat(v[2], "%");
             text_cat(v[3], LFO_SHAPE_NAME[L->shape]);
@@ -1918,7 +2020,8 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "meter")) *got = set.meter;
     else if (!strcmp(what, "drm_kick")) *got = set.drm_kick;
     else if (!strcmp(what, "drum_hits")) *got = drum_hits >= 4u;
-    else if (!strcmp(what, "dly_ms")) *got = set.dly_free ? set.dly_ms : -1;
+    else if (!strcmp(what, "d2_ms")) *got = set.d2_ms;
+    else if (!strcmp(what, "d2_on")) *got = set.d2_on;
     else if (!strcmp(what, "page")) *got = st.page;
     else if (!strcmp(what, "rec")) *got = st.rec;
     else if (!strcmp(what, "rev")) *got = set.rev_mix;
@@ -1929,12 +2032,12 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "env_s")) *got = set.env_s;
     else if (!strcmp(what, "bp_on")) *got = set.bp_on;
     else if (!strcmp(what, "bp_pat")) *got = set.bp_pat;
-    else if (!strcmp(what, "lfo_dest")) *got = set.lfo[0].on ? set.lfo[0].dest : 0;
-    else if (!strcmp(what, "lfo_arp")) *got = set.lfo[1].on ? set.lfo[1].dest : 0;
+    else if (!strcmp(what, "lfo_dest")) *got = set.lfo[0].on ? set.lfo[0].dest : -1;
+    else if (!strcmp(what, "lfo_arp")) *got = set.lfo[1].on ? set.lfo[1].dest : -1;
     else if (!strcmp(what, "led_arp")) *got = (int)(st.leds >> B_ARP & 1u);
     else if (!strcmp(what, "led_fx")) *got = (int)(st.leds >> B_FX & 1u);
     else if (!strcmp(what, "led_lfo")) *got = (int)(st.leds >> B_LFO & 1u);
-    else if (!strcmp(what, "lfo_bass")) *got = set.lfo[2].on ? set.lfo[2].dest : 0;
+    else if (!strcmp(what, "lfo_bass")) *got = set.lfo[2].on ? set.lfo[2].dest : -1;
     else if (!strcmp(what, "vol_pad")) *got = set.vol_pad;
     else if (!strcmp(what, "vol_bass")) *got = set.vol_bass;
     else if (!strcmp(what, "led_sel")) *got = (int)(st.leds >> B_SEL & 1u);
