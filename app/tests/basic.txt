@@ -219,7 +219,7 @@ expect key 2
 wait 30
 expect dly_on 0
 tap SEL
-turn K3 -1
+turn K4 -1
 wait 30
 expect dly_on 1
 expect dly 2
@@ -228,7 +228,7 @@ tap FX
 wait 30
 expect page 3
 turn K1 2
-turn K3 3
+turn K4 3
 wait 30
 expect rev_size 8
 expect rev 7

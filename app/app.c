@@ -1317,13 +1317,13 @@ static void input(void)
                 int_text(set.dly_fb * 10, t); text_cat(t, "%");
                 set_changed("REPETICIONES", t);
             } else if (k == EN_K3) {
-                set.dly_mix = (uint8_t)clamp((int32_t)set.dly_mix + e, 0, 10);
-                int_text(set.dly_mix * 10, t); text_cat(t, "%");
-                set_changed("DELAY MEZCLA", t);
-            } else {
                 set.dly_tone = (uint8_t)clamp((int32_t)set.dly_tone + e, 0, 9);
                 int_text(set.dly_tone + 1, t);
                 set_changed("DELAY TONO", t);
+            } else {                         /* la mezcla, siempre en K4 */
+                set.dly_mix = (uint8_t)clamp((int32_t)set.dly_mix + e, 0, 10);
+                int_text(set.dly_mix * 10, t); text_cat(t, "%");
+                set_changed("DELAY MEZCLA", t);
             }
         } else if (st.page == PG_REV && k >= EN_K1) {   /* REVERB (SEL la enciende) */
             if (k == EN_K1) {
@@ -1335,13 +1335,13 @@ static void input(void)
                 int_text(set.rev_tone + 1, t);
                 set_changed("REVERB TONO", t);
             } else if (k == EN_K3) {
-                set.rev_mix = (uint8_t)clamp((int32_t)set.rev_mix + e, 0, 10);
-                int_text(set.rev_mix * 10, t); text_cat(t, "%");
-                set_changed("REVERB MEZCLA", t);
-            } else {
                 set.rev_width = (uint8_t)clamp((int32_t)set.rev_width + e, 0, 10);
                 int_text(set.rev_width * 10, t); text_cat(t, "%");
                 set_changed("REVERB ANCHO", t);
+            } else {                         /* la mezcla, siempre en K4 */
+                set.rev_mix = (uint8_t)clamp((int32_t)set.rev_mix + e, 0, 10);
+                int_text(set.rev_mix * 10, t); text_cat(t, "%");
+                set_changed("REVERB MEZCLA", t);
             }
         } else if (st.page >= PG_ENV_PAD && st.page <= PG_ENV_BASS && k >= EN_K1) {   /* ENVOLVENTE: del pad, del arpegio o del bajo */
             int pg = st.page;
@@ -1621,17 +1621,17 @@ static void draw(void)
             int_text(set.bp_len * 10, v[2]); text_cat(v[2], "%");
             int_text(set.bp_oct, v[3]);
         } else if (pg == PG_DLY) {
-            lbl[0] = "TIEMPO"; lbl[1] = "REPETIR"; lbl[2] = "MEZCLA"; lbl[3] = "TONO";
+            lbl[0] = "TIEMPO"; lbl[1] = "REPETIR"; lbl[2] = "TONO"; lbl[3] = "MEZCLA";
             text_cat(v[0], DLY_DIV_NAME[set.dly_div]);
             int_text(set.dly_fb * 10, v[1]); text_cat(v[1], "%");
-            int_text(set.dly_mix * 10, v[2]); text_cat(v[2], "%");
-            int_text(set.dly_tone + 1, v[3]);
+            int_text(set.dly_tone + 1, v[2]);
+            int_text(set.dly_mix * 10, v[3]); text_cat(v[3], "%");
         } else if (pg == PG_REV) {
-            lbl[0] = "SALA"; lbl[1] = "TONO"; lbl[2] = "MEZCLA"; lbl[3] = "ANCHO";
+            lbl[0] = "SALA"; lbl[1] = "TONO"; lbl[2] = "ANCHO"; lbl[3] = "MEZCLA";
             int_text(set.rev_size + 1, v[0]);
             int_text(set.rev_tone + 1, v[1]);
-            int_text(set.rev_mix * 10, v[2]); text_cat(v[2], "%");
-            int_text(set.rev_width * 10, v[3]); text_cat(v[3], "%");
+            int_text(set.rev_width * 10, v[2]); text_cat(v[2], "%");
+            int_text(set.rev_mix * 10, v[3]); text_cat(v[3], "%");
         } else if (pg >= PG_ENV_PAD && pg <= PG_ENV_BASS) {
             int ea = pg == PG_ENV_PAD ? set.env_a : pg == PG_ENV_ARP ? set.aenv_a : set.benv_a;
             int ed = pg == PG_ENV_PAD ? set.env_d : pg == PG_ENV_ARP ? set.aenv_d : set.benv_d;
