@@ -98,6 +98,16 @@ expect arp 0
 tap ARP
 wait 30
 expect arp 1
+# encendido: los knobs son del arpegiador hasta HOME
+expect page 1
+turn K3 1
+wait 30
+expect key 2
+shot arp_page.png
+tap HOME
+wait 30
+expect page 0
+expect arp 1
 turn SELECT 20
 wait 30
 expect tempo 120
@@ -122,3 +132,4 @@ shot arp.png
 tap ARP
 wait 30
 expect arp 0
+expect page 0

@@ -14,7 +14,8 @@ Construido sobre [fm1-base](https://github.com/charlesvestal/fm1-base) de Charle
 | Última tecla negra | STOP: pulsación corta para el acorde; mantenida un segundo activa o quita el HOLD (activado por defecto: el acorde sigue sonando al soltar) |
 | K1 / K2 / K3 / K4 | Tonalidad / modo / octava / brillo del pad |
 | PRESET | Encadenar acordes (voice leading) sí o no |
-| ARP (pulsar) | Arpegiador sí o no: el acorde suena nota a nota en vez de como pad |
+| ARP (pulsar) | Arpegiador sí o no: el acorde suena nota a nota en vez de como pad. Al encenderlo, K1–K4 pasan a ser del arpegiador |
+| HOME | Los knobs vuelven al acorde (el arpegio sigue sonando) |
 | ARP mantenido + K1 / K2 / K3 / K4 | Modo (sube, baja, sube-baja, azar) / paso (1/8, 1/8T, 1/16) / octavas (1–3) / duración de cada nota |
 | SELECT | Tempo (40–220 BPM) |
 | OCT− / OCT+ | Octava |

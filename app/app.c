@@ -312,7 +312,8 @@ static struct {
     uint32_t keys, btn;
     uint8_t redraw;
     uint8_t gate_hold_off;
-    uint8_t arp_turned;                  /* con ARP mantenido se giró un knob: al soltar no se conmuta */
+    uint8_t arp_turned;
+    uint8_t page;                        /* de quién son K1..K4: 0 el acorde, 1 el arpegiador */                  /* con ARP mantenido se giró un knob: al soltar no se conmuta */
     uint32_t stop_t;                     /* la tecla STOP bajó (0: no está pulsada, o ya actuó)
                                           * corta: para el acorde; un segundo: HOLD sí / no */
 } st;
@@ -548,6 +549,8 @@ static void input(void)
             set.octave = (int8_t)(set.octave + (k == B_OCTUP ? 1 : -1));
             int_text(set.octave, t);
             set_changed("OCTAVA", t);
+        } else if (k == B_HOME) {
+            st.page = 0;                     /* los knobs vuelven al acorde (el arpegio sigue) */
         } else if (k == B_ARP) {
             st.arp_turned = 0;               /* conmuta al soltar, si no se tocó ningún knob */
         } else if (k == B_SAVE) {
@@ -558,6 +561,7 @@ static void input(void)
 
     if (!(btn >> B_ARP & 1u) && (st.btn >> B_ARP & 1u) && !st.arp_turned) {
         set.arp = (uint8_t)!set.arp;
+        st.page = set.arp;                   /* encendido: los knobs son suyos; apagado: vuelven */
         set_changed("ARPEGIO", set.arp ? "SI" : "NO");
     }
 
@@ -565,7 +569,7 @@ static void input(void)
     for (k = 0; k < NE; k++) {
         char t[24];
         if ((e = plat_enc((int)k)) == 0) continue;
-        if ((btn >> B_ARP & 1u) && k >= EN_K1) {
+        if (((btn >> B_ARP & 1u) || st.page == 1) && k >= EN_K1) {
             st.arp_turned = 1;
             if (k == EN_K1) {
                 set.arp_mode = (uint8_t)clamp((int32_t)set.arp_mode + e, 0, 3);
@@ -704,7 +708,7 @@ static void draw(void)
         chip(i < 6 ? 2 + i * 40 : 2 + (i - 6) * 48, i < 6 ? 22 : 42, i < 6 ? 38 : 46, BK_LABEL[i], on);
     }
     cv_rect(0, 64, 240, 1, C_LINE);
-    if (st.btn >> B_ARP & 1u) {          /* ARP mantenido: los knobs del arpegiador */
+    if ((st.btn >> B_ARP & 1u) || st.page == 1) {   /* los knobs del arpegiador */
         static const char *const LBL[4] = {"K1 MODO", "K2 PASO", "K3 OCTS", "K4 LARGO"};
         char v[4][12];
         v[0][0] = 0; text_cat(v[0], ARP_MODE_NAME[set.arp_mode]);
@@ -770,6 +774,7 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "hold")) *got = set.hold;
     else if (!strcmp(what, "dirty")) *got = set_dirty;
     else if (!strcmp(what, "arp")) *got = set.arp;
+    else if (!strcmp(what, "page")) *got = st.page;
     else if (!strcmp(what, "arp_mode")) *got = set.arp_mode;
     else if (!strcmp(what, "tempo")) *got = set.tempo;
     else if (!strcmp(what, "arp_moving")) *got = arp_steps >= 4u;   /* al menos cuatro pasos tocados */
