@@ -1224,17 +1224,25 @@ static void draw(void)
     }
     cv_blit(0, 32);
 
-    /* abajo: los siete grados de la tonalidad y los modificadores */
+    /* abajo, como en el teclado: arriba las teclas negras (modificadores) en sus grupos de 3, 2, 3, 2 y 1;
+     * debajo las blancas, los siete grados de la tonalidad */
     cv_begin(240, 96, C_BLACK);
+    {
+        static const uint8_t GROUP_END[5] = {3, 5, 8, 10, 11};   /* dónde acaba cada grupo */
+        int32_t x = 1;
+        int g = 0;
+        for (i = 0; i < NBK; i++) {
+            static const uint8_t W[NBK] = {26, 17, 18, 17, 17, 17, 17, 19, 17, 17, 25};   /* lo que pide cada etiqueta */
+            int32_t w = W[i];
+            chip(x, 6, w - 1, BK_LABEL[i], (int)(st.keys >> BK[i] & 1u));
+            x += w;
+            if (i + 1 == GROUP_END[g]) { x += 8; g++; }         /* hueco entre grupos */
+        }
+    }
     for (i = 0; i < NDEG; i++) {
         bl_chord d;
         bl_chord_build(set.key, set.mode, i, 0, 0, 60, &d);
-        chip(2 + i * 34, 0, 32, d.name, st.gate && st.degree == i);
-    }
-    for (i = 0; i < NBK; i++) {
-        int on = (int)(st.keys >> BK[i] & 1u);
-        if (i == BK_HOLD) on = (int)(st.keys >> BK[i] & 1u);
-        chip(i < 6 ? 2 + i * 40 : 2 + (i - 6) * 48, i < 6 ? 22 : 42, i < 6 ? 38 : 46, BK_LABEL[i], on);
+        chip(i * 34 + 1, 30, 33, d.name, st.gate && st.degree == i);
     }
     cv_rect(0, 64, 240, 1, C_LINE);
     if (st.page == 7 && !(st.btn >> B_ARP & 1u)) {   /* los knobs del bajo pulsado */
