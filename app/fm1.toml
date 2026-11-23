@@ -7,6 +7,7 @@ o2 = ["core/chords.c"]         # el motor de acordes, unidad aparte a -O2
 words = "words.tsv"
 font_full = ["L"]              # minúsculas en la fuente grande: "Am7", "Bbmaj7", "sus4"
 ble = true                     # MIDI por Bluetooth (para el directo)
+ble_stack = "own"              # la pila Bluetooth propia de fm1-base: nada de las librerías de JieLi
 # la web (tools/make_site.py)
 tagline = "acordes de bolsillo"
 repo = "https://github.com/callejodev-dotcom/barullin"

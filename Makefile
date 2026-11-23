@@ -11,3 +11,12 @@ build/test_chords: tests/test_chords.c app/core/chords.c app/core/chords.h
 
 clean:
 	rm -rf build
+
+# el simulador y el firmware (fm1-base)
+.PHONY: sim fw
+sim:
+	python3 base/tools/build.py app --host
+	app/build/host/barullin_host app/tests/basic.txt app/build/host
+
+fw:
+	python3 base/tools/build.py app
