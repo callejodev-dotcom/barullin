@@ -317,6 +317,9 @@ wait 30
 expect page 5
 tap ENV
 wait 30
+expect page 6
+tap ENV
+wait 30
 expect page 0
 # --- ENV dos veces: la envolvente del arpegio ---
 tap ENV
@@ -326,6 +329,14 @@ tap ENV
 wait 30
 expect page 5
 shot env_arp.png
+tap ENV
+wait 30
+expect page 6
+turn K3 -10
+wait 30
+expect benv_s 0
+shot env_bajo.png
+turn K3 10
 tap ENV
 wait 30
 expect page 0
