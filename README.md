@@ -37,6 +37,8 @@ Pad, bajo, arpegio y rasgueo son capas independientes que suenan a la vez; cada 
 
 Cada efecto lleva su mezcla por capas: en sus páginas, ALGORITHM elige la capa (pad, bajo, arpegio o rasgueo) y K4 cuánto manda esa capa al efecto. Arriba se ven las cuatro (P, B, A, R; la que lleva K4, resaltada). De serie, pad, arpegio y rasgueo van a los efectos y el bajo va seco.
 
+**Cada sección, su color**: la etiqueta con el nombre de la página, la raya y los nombres de los knobs van en el color de su botón (ARP azul, FX violeta, ENV verde, LFO rosa, EDIT rojo, GLO blanco; HOME, ámbar), y el mensaje de arriba también.
+
 **ALGORITHM, en todo el firmware**, elige a qué afecta la página: en FX, la capa cuya mezcla lleva K4; en ENV, de quién es la envolvente; en LFO, el destino. (En ARP, el ciclo; en GLO, encadenar; en HOME, cuadrar.)
 
 **Los sonidos del pad** (GLO, K3), a la manera de Barullo Xuno y Barullo 7FM. El pad es parafónico, como un Juno con un solo filtro: cada voz es un DCO (sierra y pulso sin aliasing, PWM y sub una octava abajo), pasan juntas por un filtro resonante que se abre con cada acorde y por el chorus de dos BBD del Juno-106 (I o II), que lo abre en estéreo. CUERDAS (chorus I), NÉBOA (sierra, PWM y sub, chorus II), METAIS (el filtro se abre al atacar), PIANO EL (FM de 7FM: cuerpo 1:1 que ladra al golpe y el diente 14:1, una octava abajo, vuelve a tocar en cada compás), ÓRGANO (pulso y sub), SINTE 80 (pulso estrecho, resonancia, filtro que pica), CAMPANA (FM 3,5:1) y CRISTAL. El arpegio y el rasgueo son FM 2:1 (brillan al golpe), y el bajo, sierra y seno por un filtro que se abre con cada nota.

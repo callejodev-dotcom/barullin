@@ -2112,6 +2112,38 @@ static void chip(int32_t x, int32_t y, int32_t w, const char *s, int on)
     cv_text(x + (w - text_w(&FONT_XS, s)) / 2, y + 2, &FONT_XS, s, on ? C_BLACK : C_GRAY);
 }
 
+/* Cada botón, su color: se sabe en qué página se está de un vistazo (la etiqueta con el nombre, la raya,
+ * los nombres de los knobs y lo resaltado). HOME, el ámbar de siempre. */
+#define RGB565(r, g, b) ((uint16_t)((((r) >> 3) << 11) | (((g) >> 2) << 5) | ((b) >> 3)))
+static void section_color(int pg, uint16_t *hi, uint16_t *lo)
+{
+    switch (pg) {
+    case PG_ARP: case PG_BP:                                   /* ARP: azul */
+        *hi = RGB565(110, 200, 255); *lo = RGB565(50, 140, 210); break;
+    case PG_DLY: case PG_DLY2: case PG_REV:                    /* FX: violeta */
+        *hi = RGB565(200, 150, 255); *lo = RGB565(150, 100, 220); break;
+    case PG_ENV_PAD: case PG_ENV_ARP: case PG_ENV_BASS:        /* ENV: verde */
+        *hi = RGB565(120, 235, 140); *lo = RGB565(60, 180, 95); break;
+    case PG_LFO_PAD: case PG_LFO_ARP: case PG_LFO_BASS:        /* LFO: rosa */
+        *hi = RGB565(255, 130, 200); *lo = RGB565(220, 80, 160); break;
+    case PG_DRUM:                                              /* EDIT (ritmo): rojo */
+        *hi = RGB565(255, 120, 100); *lo = RGB565(220, 70, 55); break;
+    case PG_GLO:                                               /* GLO: blanco */
+        *hi = RGB565(235, 235, 240); *lo = RGB565(170, 170, 178); break;
+    default:                                                   /* HOME: ámbar */
+        *hi = C_HI; *lo = C_AMB; break;
+    }
+}
+static int text_len(const char *t) { int n = 0; while (t[n]) n++; return n; }
+/* la etiqueta de la página: su nombre en negro sobre su color; devuelve dónde acaba */
+static int32_t page_tag(const char *name, uint16_t col)
+{
+    int32_t w = text_w(&FONT_XS, name);
+    cv_rect(0, 46, w + 10, 17, col);
+    cv_text(5, 50, &FONT_XS, name, C_BLACK);
+    return w + 10;
+}
+
 static void draw(void)
 {
     char t[24];
@@ -2122,7 +2154,9 @@ static void draw(void)
     cv_begin(240, 30, C_BLACK);
     if (now < st.msg_until) {
         int32_t x = cv_text(8, 7, &FONT_B, st.msg[0], C_WHITE);
-        cv_text(x + 8, 7, &FONT_B, st.msg[1], C_HI);
+        uint16_t sc, sd;
+        section_color(st.page, &sc, &sd);
+        cv_text(x + 8, 7, &FONT_B, st.msg[1], sc);
     } else {
         int32_t x = cv_text(8, 7, &FONT_B, "BARULLIN", C_WHITE);
         if (set.hold) x = cv_text(x + 8, 9, &FONT_XS, "HOLD", C_AMB);
@@ -2228,7 +2262,10 @@ static void draw(void)
         bl_chord_build(set.key, set.mode, i, 0, 0, 60, &d);
         chip(i * 34 + 1, 30, 33, d.name, st.gate && st.degree == i);
     }
-    cv_rect(0, 64, 240, 1, C_LINE);
+    {
+    uint16_t SC, SD;
+    section_color(st.page, &SC, &SD);
+    cv_rect(0, 64, 240, 1, SC);              /* la raya, del color de la sección */
     if (st.page != PG_MAIN) {            /* una página: su nombre, si suena (SEL) y sus cuatro knobs */
         const char *lbl[4] = {"", "", "", ""};
         char v[4][12], head[40] = "";
@@ -2307,13 +2344,14 @@ static void draw(void)
             text_cat(v[3], LFO_SYNC_NAME[L->sync % NSYNC]);
         }
         {
-            int32_t x = cv_text(4, 50, &FONT_XS, head, page_active(pg) ? C_HI : C_GRAY);
+            int32_t x = page_tag(PAGE_NAME[pg], SC);   /* el nombre, en su etiqueta de color */
+            x = cv_text(x + 6, 50, &FONT_XS, head + text_len(PAGE_NAME[pg]), page_active(pg) ? SC : C_GRAY);
             if (pg >= PG_ENV_PAD && pg <= PG_ENV_BASS) {   /* de quién es (ALGORITHM), resaltado */
                 static const char *const WHO[3] = {"PAD", "BAJO", "ARP"};
                 static const uint8_t WP[3] = {PG_ENV_PAD, PG_ENV_BASS, PG_ENV_ARP};
                 int q;
                 x += 8;
-                for (q = 0; q < 3; q++) x = cv_text(x, 50, &FONT_XS, WHO[q], WP[q] == pg ? C_HI : C_GRAY) + 6;
+                for (q = 0; q < 3; q++) x = cv_text(x, 50, &FONT_XS, WHO[q], WP[q] == pg ? SC : C_GRAY) + 6;
             }
             if (page_fx(pg) >= 0) {          /* los envíos de las cuatro capas; la de K4, resaltada */
                 static const char *const AB[4] = {"PAD ", "BAJO ", "ARP ", "RAS "};
@@ -2325,12 +2363,12 @@ static void draw(void)
                     text_cat(tt, AB[q]);
                     int_text(set.fx_send[f][q], nn);
                     text_cat(tt, nn);
-                    x = cv_text(x, 50, &FONT_XS, tt, q == st.fx_layer ? C_HI : C_GRAY) + 5;
+                    x = cv_text(x, 50, &FONT_XS, tt, q == st.fx_layer ? SC : C_GRAY) + 5;
                 }
             }
         }
         for (i = 0; i < 4; i++) {
-            cv_text(4 + i * 60, 68, &FONT_XS, lbl[i], C_AMB);
+            cv_text(4 + i * 60, 68, &FONT_XS, lbl[i], SD);
             cv_text(4 + i * 60, 81, &FONT_XS, v[i], C_WHITE);
         }
     } else {
@@ -2342,14 +2380,15 @@ static void draw(void)
         int_text(set.vol_strum * 100 / VOL_MAX, v[3]); text_cat(v[3], "%");
         {
             char q[24] = "CUADRAR ";
-            int32_t x = cv_text(4, 50, &FONT_XS, "VOLUMEN", C_GRAY);
+            int32_t x = page_tag("VOLUMEN", SC);
             text_cat(q, QUANT_NAME[set.quant]);
-            cv_text(x + 10, 50, &FONT_XS, q, set.quant ? C_HI : C_GRAY);
+            cv_text(x + 10, 50, &FONT_XS, q, set.quant ? SC : C_GRAY);
         }
         for (i = 0; i < 4; i++) {
-            cv_text(4 + i * 60, 68, &FONT_XS, LBL[i], C_AMB);
+            cv_text(4 + i * 60, 68, &FONT_XS, LBL[i], SD);
             cv_text(4 + i * 60, 81, &FONT_XS, v[i], C_WHITE);
         }
+    }
     }
     cv_blit(0, 144);
 }
