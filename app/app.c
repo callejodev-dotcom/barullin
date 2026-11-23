@@ -14,7 +14,7 @@
 #define SR 44100.0f
 
 /* ------------------------------------------------------------- ajustes --- */
-#define SET_MAGIC 0x42524C34u            /* "BRL4" */
+#define SET_MAGIC 0x42524C35u            /* "BRL5" */
 #define LOOP_MAX 64                      /* cambios de acorde en una idea */
 #define LOOP_STEPS 128                   /* 16 compases de corcheas */
 typedef struct { uint8_t step; int8_t degree; uint8_t mods; uint8_t inv; } loop_ev_t;
@@ -32,6 +32,10 @@ typedef struct {
     uint8_t arp_oct;                     /* 1..3 octavas */
     uint8_t arp_len;                     /* 1..9: duración de cada nota, en décimas del paso */
     uint8_t tempo;                       /* 40..220 BPM */
+    uint8_t dly_mix;                     /* 0..10: cuánto delay */
+    uint8_t dly_div;                     /* 0..5: 1/16 1/8 1/8. 1/4 1/4. 1/2 */
+    uint8_t dly_fb;                      /* 0..9: repeticiones */
+    uint8_t rev_mix;                     /* 0..10: cuánta reverb */
     uint8_t loop_len;                    /* la idea grabada: corcheas (0: no hay), compases enteros */
     uint8_t loop_n;                      /* sus cambios de acorde */
     loop_ev_t loop_ev[LOOP_MAX];
@@ -49,6 +53,8 @@ static const unsigned BK_MOD[8] = {BL_MOD_FLIP, BL_MOD_7, BL_MOD_MAJ7, BL_MOD_SU
 static const uint8_t WK[16] = PLAT_WHITE_KEYS, BK[11] = PLAT_BLACK_KEYS;
 static const char *const ARP_MODE_NAME[4] = {"SUBE", "BAJA", "S-B", "AZAR"};
 static const char *const ARP_DIV_NAME[3] = {"1/8", "1/8T", "1/16"};
+static const char *const DLY_DIV_NAME[6] = {"1/16", "1/8", "1/8.", "1/4", "1/4.", "1/2"};
+static const float DLY_BEATS[6] = {0.25f, 0.5f, 0.75f, 1.0f, 1.5f, 2.0f};
 #define NDEG 7
 #define NSTRUM 9
 
@@ -156,6 +162,69 @@ static void take_plucks(void)
     }
 }
 
+/* ------------------------------------------------------------ efectos --- */
+/* Delay estéreo de rebote, sincronizado al tempo (en int16 para que quepa: 0,75 s por canal), y una
+ * reverb tipo Freeverb pequeña (4 filtros peine y 2 pasatodo por canal). Los buffers van en el pool. */
+#define DLY_MAX 33075                    /* 0,75 s */
+static int16_t dly_buf[2][DLY_MAX] PLAT_POOL;
+static uint32_t dly_w;
+static float dly_cur = 11025.0f;         /* el tiempo actual, en muestras (se desliza hacia el pedido) */
+#define NCOMB 4
+#define NAP 2
+static const uint16_t COMB_LEN[NCOMB] = {1116, 1188, 1277, 1356}, AP_LEN[NAP] = {556, 441};
+#define RSPREAD 23
+static float comb_buf[2][NCOMB][1356 + RSPREAD] PLAT_POOL;
+static float ap_buf[2][NAP][556 + RSPREAD] PLAT_POOL;
+static uint16_t comb_i[2][NCOMB], ap_i[2][NAP];
+static float comb_lp[2][NCOMB];
+
+static float dly_target(void)
+{
+    float d = SR * 60.0f / (float)set.tempo * DLY_BEATS[set.dly_div % 6u];
+    return d > (float)(DLY_MAX - 2) ? (float)(DLY_MAX - 2) : d;
+}
+
+static inline float dly_read(int ch, float d)
+{
+    float pos = (float)dly_w - d;
+    int32_t i0, i1;
+    float fr;
+    if (pos < 0.0f) pos += (float)DLY_MAX;
+    i0 = (int32_t)pos;
+    if (i0 >= DLY_MAX) i0 = DLY_MAX - 1;
+    fr = pos - (float)i0;
+    i1 = i0 + 1 >= DLY_MAX ? 0 : i0 + 1;
+    return ((float)dly_buf[ch][i0] * (1.0f - fr) + (float)dly_buf[ch][i1] * fr) * (1.0f / 32767.0f);
+}
+
+static inline int16_t sat16(float v)
+{
+    v *= 32767.0f;
+    return (int16_t)(v > 32767.0f ? 32767.0f : v < -32767.0f ? -32767.0f : v);
+}
+
+static inline float reverb_ch(int ch, float in)
+{
+    float out = 0.0f;
+    int k;
+    for (k = 0; k < NCOMB; k++) {
+        uint16_t len = (uint16_t)(COMB_LEN[k] + (ch ? RSPREAD : 0));
+        float *b = comb_buf[ch][k], y = b[comb_i[ch][k]];
+        comb_lp[ch][k] = y * 0.8f + comb_lp[ch][k] * 0.2f;      /* amortiguación: los agudos se apagan antes */
+        b[comb_i[ch][k]] = in + comb_lp[ch][k] * 0.84f;
+        if (++comb_i[ch][k] >= len) comb_i[ch][k] = 0;
+        out += y;
+    }
+    for (k = 0; k < NAP; k++) {
+        uint16_t len = (uint16_t)(AP_LEN[k] + (ch ? RSPREAD : 0));
+        float *b = ap_buf[ch][k], bo = b[ap_i[ch][k]];
+        b[ap_i[ch][k]] = out + bo * 0.5f;
+        out = bo - out;
+        if (++ap_i[ch][k] >= len) ap_i[ch][k] = 0;
+    }
+    return out;
+}
+
 /* ----------------------------------------------------------- arpegio --- */
 static void midi_rt(uint32_t b) { plat_midi_send(0x0Fu | b << 8, TO_USB | TO_BLE); }   /* reloj, start, stop */
 static void midi_ch(uint32_t st_, uint32_t ch, uint32_t d1, uint32_t d2)
@@ -220,6 +289,8 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     int j;
     float cut = snd_cut;
     float gain = (float)master_q12 / 4096.0f * 7000000.0f;
+    float dmix = (float)set.dly_mix * 0.07f, dfb = (float)set.dly_fb * 0.09f;
+    float rmix = (float)set.rev_mix * 0.12f, dtarget = dly_target();
     if (seq != snd_seen) {
         snd_seen = seq;
         take_chord(&snd_buf[seq & 1u]);
@@ -265,14 +336,6 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         lp1[1] += (r - lp1[1]) * cut; lp2[1] += (lp1[1] - lp2[1]) * cut;
         l = lp2[0];
         r = lp2[1];
-        /* bajo: un seno */
-        if (bass_gate) { bass_env += 1.0f / (0.02f * SR); if (bass_env > 1.0f) bass_env = 1.0f; }
-        else bass_env *= 0.9997f;
-        if (bass_env > 0.0001f) {
-            bass_ph += bass_inc; if (bass_ph >= 1.0f) bass_ph -= 1.0f;
-            b = fm_sinf(bass_ph * 6.2831853f) * bass_env * 0.30f;
-            l += b; r += b;
-        }
         /* rasgueos: seno con algo de segundo armónico, que se apaga solo */
         for (j = 0; j < NPLK; j++) {
             plk_v *p = &plk[j];
@@ -285,6 +348,31 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
                 if (--p->left == 0) midi_ch(0x80u, 4, p->note, 0);
             } else p->env *= 0.9990f;                         /* y se suelta rápido */
             l += s * 1.1f; r += s * 0.9f;
+        }
+        /* efectos: delay de rebote y reverb, sobre el pad, el rasgueo y el arpegio */
+        if (dmix > 0.0f || dfb > 0.0f) {
+            float yl, yr;
+            dly_cur += (dtarget - dly_cur) * 0.0002f;
+            yl = dly_read(0, dly_cur);
+            yr = dly_read(1, dly_cur);
+            dly_buf[0][dly_w] = sat16((l + r) * 0.5f + yr * dfb);   /* lo nuevo entra por la izquierda */
+            dly_buf[1][dly_w] = sat16(yl * dfb);                      /* y rebota a la derecha */
+            if (++dly_w >= DLY_MAX) dly_w = 0;
+            l += yl * dmix;
+            r += yr * dmix;
+        }
+        if (rmix > 0.0f) {
+            float in = (l + r) * 0.03f;
+            l += reverb_ch(0, in) * rmix;
+            r += reverb_ch(1, in) * rmix;
+        }
+        /* bajo: un seno, seco */
+        if (bass_gate) { bass_env += 1.0f / (0.02f * SR); if (bass_env > 1.0f) bass_env = 1.0f; }
+        else bass_env *= 0.9997f;
+        if (bass_env > 0.0001f) {
+            bass_ph += bass_inc; if (bass_ph >= 1.0f) bass_ph -= 1.0f;
+            b = fm_sinf(bass_ph * 6.2831853f) * bass_env * 0.30f;
+            l += b; r += b;
         }
         gain_now += (gain - gain_now) * 0.004f;
         lr[2 * i] = (int32_t)(fm_tanhf(l) * gain_now);
@@ -318,7 +406,7 @@ static struct {
     uint8_t redraw;
     uint8_t gate_hold_off;
     uint8_t arp_turned;
-    uint8_t page;
+    uint8_t page;                        /* de quién son K1..K4: 0 el acorde, 1 el arpegiador, 2 los efectos */
     uint8_t rec;                         /* 0 no, 1 armado (espera el primer acorde), 2 grabando */
     uint8_t playing;
     float rec_acc, play_acc;             /* corcheas desde que empezó la grabación / dentro del bucle */
@@ -348,6 +436,10 @@ static void settings_defaults(void)
     set.arp_oct = 1;
     set.arp_len = 5;
     set.tempo = 100;
+    set.dly_mix = 3;
+    set.dly_div = 2;
+    set.dly_fb = 4;
+    set.rev_mix = 4;
     set.loop_len = 0;
     set.loop_n = 0;
 }
@@ -359,6 +451,7 @@ static void settings_load(void)
         || set.bright > 20u || set.lead > 1u || set.hold > 1u
         || set.arp > 1u || set.arp_mode > 3u || set.arp_div > 2u || set.arp_oct < 1u || set.arp_oct > 3u
         || set.arp_len < 1u || set.arp_len > 9u || set.tempo < 40u || set.tempo > 220u
+        || set.dly_mix > 10u || set.dly_div > 5u || set.dly_fb > 9u || set.rev_mix > 10u
         || set.loop_len > LOOP_STEPS || set.loop_n > LOOP_MAX || (set.loop_len && !set.loop_n))
         settings_defaults();
 }
@@ -670,6 +763,8 @@ static void input(void)
             if (st.rec == 2) seq_finish();
             else if (!set.loop_len) app_say("PLAY", "GRABA CON REC");
             else seq_play(!st.playing);
+        } else if (k == B_FX) {
+            st.page = st.page == 2 ? 0 : 2;  /* los knobs, a los efectos (y vuelta) */
         } else if (k == B_HOME) {
             st.page = 0;                     /* los knobs vuelven al acorde (el arpegio sigue) */
         } else if (k == B_ARP) {
@@ -708,6 +803,23 @@ static void input(void)
                 text_cat(t, "%");
                 set_changed("ARP LARGO", t);
             }
+        } else if (st.page == 2 && k >= EN_K1) {
+            if (k == EN_K1) {
+                set.dly_mix = (uint8_t)clamp((int32_t)set.dly_mix + e, 0, 10);
+                int_text(set.dly_mix * 10, t); text_cat(t, "%");
+                set_changed("DELAY", t);
+            } else if (k == EN_K2) {
+                set.dly_div = (uint8_t)clamp((int32_t)set.dly_div + e, 0, 5);
+                set_changed("DELAY TIEMPO", DLY_DIV_NAME[set.dly_div]);
+            } else if (k == EN_K3) {
+                set.dly_fb = (uint8_t)clamp((int32_t)set.dly_fb + e, 0, 9);
+                int_text(set.dly_fb * 10, t); text_cat(t, "%");
+                set_changed("REPETICIONES", t);
+            } else {
+                set.rev_mix = (uint8_t)clamp((int32_t)set.rev_mix + e, 0, 10);
+                int_text(set.rev_mix * 10, t); text_cat(t, "%");
+                set_changed("REVERB", t);
+            }
         } else if (k == EN_SELECT) {
             set.tempo = (uint8_t)clamp((int32_t)set.tempo + e, 40, 220);
             int_text(set.tempo, t);
@@ -740,7 +852,8 @@ static void input(void)
     st.btn = btn;
     plat_glow(1);
     {
-        uint32_t lit = btn | (set_dirty ? 1u << B_SAVE : 0u) | (set.arp ? 1u << B_ARP : 0u);
+        uint32_t lit = btn | (set_dirty ? 1u << B_SAVE : 0u) | (set.arp ? 1u << B_ARP : 0u)
+                       | (st.page == 2 ? 1u << B_FX : 0u);
         if (st.playing || st.rec == 2) lit |= 1u << B_PLAY;
         if (st.rec == 2 || (st.rec == 1 && (plat_ms() / 250u) & 1u)) lit |= 1u << B_REC;   /* armado: parpadea */
         plat_play_red(st.rec == 2);
@@ -853,7 +966,18 @@ static void draw(void)
         chip(i < 6 ? 2 + i * 40 : 2 + (i - 6) * 48, i < 6 ? 22 : 42, i < 6 ? 38 : 46, BK_LABEL[i], on);
     }
     cv_rect(0, 64, 240, 1, C_LINE);
-    if ((st.btn >> B_ARP & 1u) || st.page == 1) {   /* los knobs del arpegiador */
+    if (st.page == 2 && !(st.btn >> B_ARP & 1u)) {   /* los knobs de los efectos */
+        static const char *const LBL[4] = {"K1 DELAY", "K2 TIEMPO", "K3 REPET", "K4 REVERB"};
+        char v[4][12];
+        int_text(set.dly_mix * 10, v[0]); text_cat(v[0], "%");
+        v[1][0] = 0; text_cat(v[1], DLY_DIV_NAME[set.dly_div]);
+        int_text(set.dly_fb * 10, v[2]); text_cat(v[2], "%");
+        int_text(set.rev_mix * 10, v[3]); text_cat(v[3], "%");
+        for (i = 0; i < 4; i++) {
+            cv_text(4 + i * 60, 68, &FONT_XS, LBL[i], C_AMB);
+            cv_text(4 + i * 60, 81, &FONT_XS, v[i], C_WHITE);
+        }
+    } else if ((st.btn >> B_ARP & 1u) || st.page == 1) {   /* los knobs del arpegiador */
         static const char *const LBL[4] = {"K1 MODO", "K2 PASO", "K3 OCTS", "K4 LARGO"};
         char v[4][12];
         v[0][0] = 0; text_cat(v[0], ARP_MODE_NAME[set.arp_mode]);
@@ -921,6 +1045,8 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "arp")) *got = set.arp;
     else if (!strcmp(what, "page")) *got = st.page;
     else if (!strcmp(what, "rec")) *got = st.rec;
+    else if (!strcmp(what, "rev")) *got = set.rev_mix;
+    else if (!strcmp(what, "dly")) *got = set.dly_mix;
     else if (!strcmp(what, "playing")) *got = st.playing;
     else if (!strcmp(what, "loop_len")) *got = set.loop_len;
     else if (!strcmp(what, "loop_n")) *got = set.loop_n;

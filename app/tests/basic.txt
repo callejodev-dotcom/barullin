@@ -187,3 +187,24 @@ wait 600
 expect loop_len 8
 expect loop_n 2
 expect playing 0
+# --- efectos: FX pasa los knobs a delay / tiempo / repeticiones / reverb ---
+tap FX
+wait 30
+expect page 2
+expect key 2
+turn K4 3
+turn K1 -1
+wait 30
+expect rev 7
+expect dly 2
+shot fx.png
+key 0 down
+wait 30
+key 0 up
+wav fx.wav
+wait 2500
+wavstop
+expect peak_db_min -30
+tap FX
+wait 30
+expect page 0
