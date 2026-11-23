@@ -26,6 +26,7 @@ import copy
 import ctypes
 import gzip
 import os
+import shutil
 import re
 import struct
 import subprocess
@@ -556,6 +557,7 @@ def write_als(path, ideas_out, tpl=None, stage=4):
     scenes = ls.find("Scenes")
     nslots = len(proto.findall("DeviceChain/MainSequencer/ClipSlotList/ClipSlot"))
     first = next((x for x in ideas_out if x), None)
+    pos = 0                                       # (las pistas van seguidas, antes de las de retorno)
     for pi, part in enumerate(PARTS):
         if not any(x and x[3].get(part) for x in ideas_out):
             continue
@@ -620,7 +622,8 @@ def write_als(path, ideas_out, tpl=None, stage=4):
                 ET.SubElement(kt, "MidiKey", Value=str(n))
             clip.find("Notes/NoteIdGenerator/NextId").set("Value", str(nid))
             slots[si].find("ClipSlot/Value").append(clip)
-        tracks.insert(pi, t)
+        tracks.insert(pos, t)
+        pos += 1
     if stage < 4:
         ls.find("NextPointeeId").set("Value", str(next_id))
         return save_als(root, path)
@@ -727,8 +730,7 @@ def host_sim():
     src = os.path.join(ROOT, "app", "app.c")
     if not os.path.exists(exe) or os.path.getmtime(exe) < os.path.getmtime(src):
         print("preparando el simulador de Barullín (la primera vez tarda un poco)...")
-        r = subprocess.run([sys.executable, os.path.join(BASE_TOOLS, "build.py"), os.path.join(ROOT, "app"), "--host"],
-                           capture_output=True, text=True)
+        r = subprocess.run([sys.executable, os.path.join(HERE, "host_build.py")], capture_output=True, text=True)
         if r.returncode or not os.path.exists(exe):
             print("  (no pude preparar el simulador: los proyectos salen sin el sonido original)\n" + r.stderr[-800:])
             return None
@@ -744,9 +746,10 @@ def render_original(backup, cur_bank, i, beats, tempo, outwav):
     loop_ms = beats * 60000.0 / tempo
     work = tempfile.mkdtemp(prefix="barullin_")
     script = os.path.join(work, "toca.txt")
+    shutil.copy(backup, os.path.join(work, "copia.barullin"))
     seq = (i - cur_bank) % NBANK
     with open(script, "w") as f:
-        f.write("wait 1500\nrestore %s\nwait 300\n" % os.path.abspath(backup))
+        f.write("wait 1500\nrestore out:copia.barullin\nwait 300\nexpect restore_rc 0\n")   # (por nombre: el guion parte en los espacios)
         f.write("tap SEQ\n" * seq + "wait 100\n")
         f.write("turn K4 -20\nwait 50\n")                  # (el rasgueo callado: la tecla de abajo es la marca de tiempo)
         f.write("wav toca.wav\nkey 14 down\nwait 20\nkey 14 up\ntap PLAY\n")
