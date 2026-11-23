@@ -17,7 +17,7 @@ Construido sobre [fm1-base](https://github.com/charlesvestal/fm1-base) de Charle
 
 ### Páginas
 
-Los knobs K1–K4 son de la página en la que estás. Cada botón recorre sus páginas (de la última vuelve a la primera) y, si vienes de otra parte, te lleva a la última suya en la que estuviste. Lo que se enciende y se apaga va siempre en **K1**. **HOME** vuelve a la página principal; lo que suena sigue sonando.
+Los knobs K1–K4 son de la página en la que estás. Cada botón recorre sus páginas (de la última vuelve a la primera). Si vienes de otra parte, te lleva a la página que tiene algo encendido (si hay varias, a la última que visitaste) y, si no hay ninguna, a la última suya en la que estuviste. Lo que se enciende y se apaga va siempre en **K1**. La luz de ARP, FX y LFO sigue encendida mientras algo de su sección suena. **HOME** vuelve a la página principal; lo que suena sigue sonando.
 
 | Botón | Páginas | K1 | K2 | K3 | K4 |
 | --- | --- | --- | --- | --- | --- |

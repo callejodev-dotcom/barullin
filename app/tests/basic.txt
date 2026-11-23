@@ -229,13 +229,13 @@ wait 30
 expect rev_size 8
 expect rev 7
 shot fx_reverb.png
-# HOME y luego FX: vuelve a la reverb, donde estaba
+# HOME y luego FX: el delay está encendido y la reverb no, así que lleva al delay
 tap HOME
 wait 30
 expect page 0
 tap FX
 wait 30
-expect page 3
+expect page 2
 key 0 down
 wait 30
 key 0 up
@@ -245,7 +245,7 @@ wavstop
 expect peak_db_min -30
 tap FX
 wait 30
-expect page 2
+expect page 3
 tap HOME
 wait 30
 expect page 0
@@ -429,3 +429,58 @@ expect page 8
 tap HOME
 wait 30
 expect page 0
+# --- luces y destino: ARP iluminado si algo de su sección suena; desde fuera, lleva a lo encendido ---
+expect page 0
+expect led_arp 0
+# el delay sigue encendido de antes: FX iluminado, y FX lleva a él; se apaga con K1
+expect led_fx 1
+tap FX
+wait 30
+expect page 2
+turn K1 -1
+tap HOME
+wait 30
+expect led_fx 0
+tap ARP
+wait 30
+tap ARP
+wait 30
+expect page 7
+turn K1 1
+wait 30
+expect bp_on 1
+tap ARP
+wait 30
+expect page 1
+tap HOME
+wait 30
+expect led_arp 1
+# la última visitada fue el arpegiador (apagado): ARP lleva al bajo pulsado, que es lo que suena
+tap ARP
+wait 30
+expect page 7
+turn K1 -1
+tap HOME
+wait 30
+expect led_arp 0
+# FX: la reverb encendida, el delay no; desde fuera, a la reverb
+tap FX
+wait 30
+expect page 2
+tap FX
+wait 30
+expect page 3
+turn K1 1
+tap FX
+wait 30
+expect page 2
+tap HOME
+wait 30
+expect led_fx 1
+tap FX
+wait 30
+expect page 3
+turn K1 -1
+tap HOME
+wait 30
+expect led_fx 0

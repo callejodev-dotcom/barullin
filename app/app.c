@@ -611,6 +611,7 @@ static struct {
     uint8_t redraw;
     uint8_t gate_hold_off;
     uint8_t mem_arp, mem_fx, mem_env, mem_lfo;   /* la última página de cada botón: se vuelve a ella */
+    uint32_t leds;                       /* los botones iluminados (para las pruebas) */
     uint8_t page;                        /* de quién son K1..K4: 0 acorde, 1 arpegiador, 2 delay, 3 reverb,
                                           * 4..6 envolventes (pad, arpegio, bajo), 7 bajo pulsado */
     uint8_t rec;                         /* 0 no, 1 armado (espera el primer acorde), 2 grabando */
@@ -898,13 +899,32 @@ static const char *page_state(int pg)    /* lo que se dice al entrar: si está e
     }
 }
 
-/* un botón con varias páginas: dentro, pasa a la siguiente (y de la última a la primera); desde fuera,
- * vuelve a la última en la que se estuvo */
+/* si lo de la página está encendido (las envolventes no se encienden ni se apagan) */
+static int page_active(int pg)
+{
+    switch (pg) {
+    case PG_ARP: return set.arp != 0;
+    case PG_BP: return set.bp_on != 0;
+    case PG_DLY: return set.dly_on != 0;
+    case PG_REV: return set.rev_on != 0;
+    case PG_LFO_PAD: case PG_LFO_ARP: case PG_LFO_BASS: return set.lfo[pg - PG_LFO_PAD].dest != 0;
+    default: return 0;
+    }
+}
+
+/* un botón con varias páginas: dentro, pasa a la siguiente (y de la última a la primera); desde fuera, lleva a
+ * la que tiene algo encendido (la última visitada si hay varias), y si no hay ninguna, a la última visitada */
 static void page_go(const uint8_t *pages, int n, uint8_t *mem)
 {
-    int i, cur = -1;
-    for (i = 0; i < n; i++) if (st.page == pages[i]) cur = i;
-    st.page = cur >= 0 ? pages[(cur + 1) % n] : (*mem ? *mem : pages[0]);
+    int i, cur = -1, first_on = -1;
+    for (i = 0; i < n; i++) {
+        if (st.page == pages[i]) cur = i;
+        if (first_on < 0 && page_active(pages[i])) first_on = i;
+    }
+    if (cur >= 0) st.page = pages[(cur + 1) % n];
+    else if (*mem && page_active(*mem)) st.page = *mem;
+    else if (first_on >= 0) st.page = pages[first_on];
+    else st.page = *mem ? *mem : pages[0];
     *mem = st.page;
     app_say(PAGE_NAME[st.page], page_state(st.page));
 }
@@ -1291,13 +1311,16 @@ static void input(void)
     st.btn = btn;
     plat_glow(1);
     {
-        /* cada botón, encendido mientras se está en una de sus páginas */
+        /* cada botón, encendido mientras algo de su sección suena, o mientras se está en una de sus páginas */
+        int arp_on = set.arp || set.bp_on, fx_on = set.dly_on || set.rev_on;
+        int lfo_on = set.lfo[0].dest || set.lfo[1].dest || set.lfo[2].dest;
         uint32_t lit = btn | (set_dirty ? 1u << B_SAVE : 0u)
-                       | (st.page == PG_ARP || st.page == PG_BP ? 1u << B_ARP : 0u)
-                       | (st.page == PG_DLY || st.page == PG_REV ? 1u << B_FX : 0u)
+                       | (arp_on || st.page == PG_ARP || st.page == PG_BP ? 1u << B_ARP : 0u)
+                       | (fx_on || st.page == PG_DLY || st.page == PG_REV ? 1u << B_FX : 0u)
                        | (st.page >= PG_ENV_PAD && st.page <= PG_ENV_BASS ? 1u << B_ENV : 0u)
-                       | (st.page >= PG_LFO_PAD && st.page <= PG_LFO_BASS ? 1u << B_LFO : 0u)
+                       | (lfo_on || (st.page >= PG_LFO_PAD && st.page <= PG_LFO_BASS) ? 1u << B_LFO : 0u)
                        | (st.page == PG_MAIN ? 1u << B_HOME : 0u);
+        st.leds = lit;
         if (st.playing || st.rec == 2) lit |= 1u << B_PLAY;
         if (st.rec == 2 || (st.rec == 1 && (plat_ms() / 250u) & 1u)) lit |= 1u << B_REC;   /* armado: parpadea */
         plat_play_red(st.rec == 2);
@@ -1580,6 +1603,9 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "bp_pat")) *got = set.bp_pat;
     else if (!strcmp(what, "lfo_dest")) *got = set.lfo[0].dest;
     else if (!strcmp(what, "lfo_arp")) *got = set.lfo[1].dest;
+    else if (!strcmp(what, "led_arp")) *got = (int)(st.leds >> B_ARP & 1u);
+    else if (!strcmp(what, "led_fx")) *got = (int)(st.leds >> B_FX & 1u);
+    else if (!strcmp(what, "led_lfo")) *got = (int)(st.leds >> B_LFO & 1u);
     else if (!strcmp(what, "lfo_bass")) *got = set.lfo[2].dest;
     else if (!strcmp(what, "benv_s")) *got = set.benv_s;
     else if (!strcmp(what, "low_note_is_bass")) {   /* todas las voces de bajo suenan la nota del bajo */
