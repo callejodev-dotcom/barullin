@@ -410,6 +410,23 @@ wav lfo.wav
 wait 3000
 wavstop
 turn K1 -2
+# LFO dos veces: el del arpegio; tres: el del bajo; cuatro: fuera
+tap LFO
+wait 30
+expect page 9
+turn K1 2
+wait 30
+expect lfo_arp 2
+expect lfo_dest 0
+turn K1 -2
+tap LFO
+wait 30
+expect page 10
+turn K1 3
+wait 30
+expect lfo_bass 3
+shot lfo_bajo.png
+turn K1 -3
 tap LFO
 wait 30
 expect page 0
