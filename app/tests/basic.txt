@@ -129,10 +129,22 @@ wait 30
 expect arp_mode 2
 expect arp 1
 shot arp.png
+# arpegio solo: ni pad ni bajo
+wait 800
+expect pad_on 0
+expect bass_on 0
+# segunda pulsación: arpegio + pad (sin bajo); tercera: apagado
 tap ARP
-wait 30
+wait 400
+expect arp 2
+expect pad_on 1
+expect bass_on 0
+tap ARP
+wait 400
 expect arp 0
 expect page 0
+expect pad_on 1
+expect bass_on 1
 # --- ideas: REC graba los cambios de acorde, PLAY los repite (100 BPM: corchea = 300 ms) ---
 expect tempo 120
 turn SELECT -20
@@ -187,17 +199,29 @@ wait 600
 expect loop_len 8
 expect loop_n 2
 expect playing 0
-# --- efectos: FX pasa los knobs a delay / tiempo / repeticiones / reverb ---
+# --- efectos: FX una vez, delay; dos, reverb; tres, fuera ---
 tap FX
 wait 30
 expect page 2
 expect key 2
-turn K4 3
 turn K1 -1
 wait 30
-expect rev 7
+expect dly_on 0
+turn K1 1
+turn K4 -1
+wait 30
+expect dly_on 1
 expect dly 2
-shot fx.png
+shot fx_delay.png
+tap FX
+wait 30
+expect page 3
+turn K2 2
+turn K4 3
+wait 30
+expect rev_size 8
+expect rev 7
+shot fx_reverb.png
 key 0 down
 wait 30
 key 0 up
