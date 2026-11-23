@@ -2512,12 +2512,12 @@ static void draw(void)
         char bt[8];
         int32_t bw = batt_text(bt), kw = text_w(&FONT_B, t);
         if (bw && 232 - bw - 8 - kw <= x + 6) bw = 0;   /* (si no cabe con la tonalidad: con un modo largo y HOLD) */
-        int32_t kx = 232 - kw - (bw ? bw + 8 : 0);       /* la tonalidad, y a la derecha del todo la batería */
+        int32_t kx = 232 - kw - (bw ? bw - 2 : 0);       /* la tonalidad, y en la esquina la batería */
         cv_text(kx, 7, &FONT_B, t, C_HI);
         if (bw) {
             int16_t c = st.batt_shown, pc = c % 1000;
             uint16_t col = c >= 1000 || pc >= 30 ? RGB565(120, 235, 140) : pc >= 15 ? C_AMB : RGB565(255, 70, 60);
-            cv_text(232 - bw, 11, &FONT_XS, bt, col);
+            cv_text(238 - bw, 2, &FONT_XS, bt, col);     /* (pegada a la esquina, arriba) */
         }
     }
     cv_rect(0, 29, 240, 1, C_LINE);
