@@ -32,7 +32,7 @@ static const char *const MODE_NAME[BL_MODE_COUNT] = {"MAYOR", "DORICO", "FRIGIO"
                                                      "MIXOLIDIO", "MENOR", "LOCRIO"};
 /* las teclas negras, de izquierda a derecha */
 enum { BK_FLIP, BK_7, BK_MAJ7, BK_SUS2, BK_SUS4, BK_9, BK_6, BK_DIMAUG, BK_INV1, BK_INV2, BK_HOLD, NBK };
-static const char *const BK_LABEL[NBK] = {"m/M", "7", "M7", "s2", "s4", "9", "6", "o/+", "I1", "I2", "HOLD"};
+static const char *const BK_LABEL[NBK] = {"m/M", "7", "M7", "s2", "s4", "9", "6", "o/+", "I1", "I2", "STOP"};
 static const unsigned BK_MOD[8] = {BL_MOD_FLIP, BL_MOD_7, BL_MOD_MAJ7, BL_MOD_SUS2,
                                    BL_MOD_SUS4, BL_MOD_9, BL_MOD_6, BL_MOD_DIMAUG};
 static const uint8_t WK[16] = PLAT_WHITE_KEYS, BK[11] = PLAT_BLACK_KEYS;
@@ -207,6 +207,9 @@ static struct {
     uint32_t msg_until;
     uint32_t keys, btn;
     uint8_t redraw;
+    uint8_t gate_hold_off;
+    uint32_t stop_t;                     /* la tecla STOP bajó (0: no está pulsada, o ya actuó)
+                                          * corta: para el acorde; un segundo: HOLD sí / no */
 } st;
 
 static void cut_update(void)
@@ -388,11 +391,22 @@ static void input(void)
     for (i = 0; i < 8; i++) if (keys >> BK[i] & 1u) mods |= BK_MOD[i];
     if (keys >> BK[BK_INV1] & 1u) inv = 1;
     if (keys >> BK[BK_INV2] & 1u) inv = 2;
-    if ((keys >> BK[BK_HOLD] & 1u) && !(st.keys >> BK[BK_HOLD] & 1u)) {
-        set.hold = (uint8_t)!set.hold;
-        set_changed("HOLD", set.hold ? "SI" : "NO");
+    {
+        int down = (int)(keys >> BK[BK_HOLD] & 1u), was = (int)(st.keys >> BK[BK_HOLD] & 1u);
+        if (down && !was) st.stop_t = plat_ms() | 1u;
+        if (down && st.stop_t && plat_ms() - st.stop_t >= 1000u) {   /* mantenida: HOLD sí / no */
+            st.stop_t = 0;
+            set.hold = (uint8_t)!set.hold;
+            set_changed("HOLD", set.hold ? "SI" : "NO");
+        }
+        if (!down && was && st.stop_t) {   /* pulsación corta: STOP */
+            st.stop_t = 0;
+            if (degree < 0) st.gate_hold_off = 1;
+        }
     }
-    if (degree < 0 && set.hold && st.gate) {   /* HOLD: el acorde sigue; los modificadores aún lo cambian */
+    if (st.gate_hold_off) {                /* parado: hasta el siguiente grado */
+        if (degree >= 0) st.gate_hold_off = 0;
+    } else if (degree < 0 && set.hold && st.gate) {   /* HOLD: el acorde sigue; los modificadores aún lo cambian */
         degree = st.degree;
         if (!mods) mods = st.mods;
     }
@@ -482,7 +496,8 @@ static void draw(void)
         int32_t x = cv_text(8, 7, &FONT_B, st.msg[0], C_WHITE);
         cv_text(x + 8, 7, &FONT_B, st.msg[1], C_HI);
     } else {
-        cv_text(8, 7, &FONT_B, "BARULLIN", C_WHITE);
+        int32_t x = cv_text(8, 7, &FONT_B, "BARULLIN", C_WHITE);
+        if (set.hold) cv_text(x + 8, 9, &FONT_XS, "HOLD", C_AMB);
         key_text(t);
         cv_text(232 - text_w(&FONT_B, t), 7, &FONT_B, t, C_HI);
     }
@@ -537,7 +552,7 @@ static void draw(void)
     }
     for (i = 0; i < NBK; i++) {
         int on = (int)(st.keys >> BK[i] & 1u);
-        if (i == BK_HOLD) on = set.hold;
+        if (i == BK_HOLD) on = (int)(st.keys >> BK[i] & 1u);
         chip(i < 6 ? 2 + i * 40 : 2 + (i - 6) * 48, i < 6 ? 22 : 42, i < 6 ? 38 : 46, BK_LABEL[i], on);
     }
     cv_rect(0, 64, 240, 1, C_LINE);

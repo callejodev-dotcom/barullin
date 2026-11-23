@@ -16,15 +16,30 @@ wait 50
 # HOLD por defecto: el acorde sigue al soltar
 expect hold 1
 expect degree 0
-# la tecla HOLD (la última negra, tecla 25) lo quita y el acorde se calla
+# STOP (la última negra, tecla 25), pulsación corta: el acorde se calla, HOLD sigue
 key 25 down
 wait 30
 key 25 up
 wait 30
-expect hold 0
+expect hold 1
 expect degree -1
-key 25 down
+shot stop.png
+# un grado nuevo vuelve a sonar y se queda
+key 2 down
 wait 30
+key 2 up
+wait 30
+expect degree 1
+# STOP mantenido un segundo: HOLD fuera (y el acorde se calla)
+key 25 down
+wait 1100
+expect hold 0
+key 25 up
+wait 30
+expect degree -1
+# y otra vez dentro
+key 25 down
+wait 1100
 key 25 up
 wait 30
 expect hold 1
