@@ -1279,6 +1279,7 @@ static struct {
     uint8_t kit_bank;
     int8_t bt_pick;                      /* Bluetooth: lo elegido con ALGORITHM (0 BUSCAR) */
     uint8_t bt_tried, bt_last;
+    int8_t batt_shown;                   /* la batería pintada en la cabecera (plat_battery) */
     uint32_t bt_drawn;                   /* la última vez que se pintó la página de Bluetooth */           /* la reconexión de al arrancar, ya intentada; el último estado dicho */                    /* el banco cuyo sonido suena ahora (el que se edita) */                      /* el aviso de "sube el volumen", ya dado */                    /* FX: la capa cuyo envío lleva K4 (ALGORITHM la elige) */                     /* se pulsó una tecla de acorde: vuelve a sonar aunque sea el mismo */
     uint32_t q_sig, q_resets;
     int8_t q_deg;                        /* el acorde que espera (sigue esperando aunque se suelte la tecla) */
@@ -2458,6 +2459,30 @@ static int32_t page_tag(const char *name, uint16_t col)
     return w + 10;
 }
 
+/* la batería, en la cabecera: una pila de 3 rayas (roja con 0), o el enchufe si va por USB */
+static void batt_icon(int32_t x, int32_t y)
+{
+    int b = plat_battery();
+    st.batt_shown = (int8_t)b;
+    if (b < 0) return;                                 /* (aún sin leer) */
+    uint16_t frame = b == 0 ? RGB565(255, 70, 60) : C_GRAY;
+    cv_rect(x, y, 20, 11, frame);                      /* el cuerpo */
+    cv_rect(x + 1, y + 1, 18, 9, C_BLACK);
+    cv_rect(x + 20, y + 3, 2, 5, frame);               /* el polo */
+    if (b >= 4) {                                      /* por USB: un rayo de carga, lleno */
+        cv_rect(x + 2, y + 2, 16, 7, RGB565(120, 235, 140));
+        cv_rect(x + 9, y + 2, 2, 7, C_BLACK);
+        return;
+    }
+    uint16_t col = b == 0 ? RGB565(255, 70, 60) : b == 1 ? C_AMB : RGB565(120, 235, 140);
+    if (b == 0) {
+        cv_rect(x + 2, y + 2, 3, 7, col);              /* vacía: una astilla roja */
+        return;
+    }
+    for (int i = 0; i < b; i++)
+        cv_rect(x + 2 + i * 6, y + 2, 4, 7, col);
+}
+
 static void draw(void)
 {
     char t[24];
@@ -2475,7 +2500,10 @@ static void draw(void)
         int32_t x = cv_text(8, 7, &FONT_B, "BARULLIN", C_WHITE);
         if (set.hold) x = cv_text(x + 8, 9, &FONT_XS, "HOLD", C_AMB);
         key_text(t);
-        cv_text(232 - text_w(&FONT_B, t), 7, &FONT_B, t, C_HI);
+        int32_t kx = 232 - text_w(&FONT_B, t);
+        cv_text(kx, 7, &FONT_B, t, C_HI);
+        if (kx - 30 > x + 6) batt_icon(kx - 30, 10);   /* (si cabe: con un modo largo y HOLD, no) */
+        else st.batt_shown = (int8_t)plat_battery();
     }
     cv_rect(0, 29, 240, 1, C_LINE);
     cv_blit(0, 0);
@@ -2766,6 +2794,7 @@ void app_frame(void)
             st.redraw = 1;
         }
     }
+    if (plat_battery() != st.batt_shown) st.redraw = 1;   /* la pila de la cabecera, al día */
     if (ann_on() && ann_where()) {
         char t[48] = "";
         text_cat(t, "BARULLIN. ");
