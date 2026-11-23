@@ -144,6 +144,7 @@ static const float DLY_BEATS[6] = {0.25f, 0.5f, 0.75f, 1.0f, 1.5f, 2.0f};
 /* El UI publica el acorde en uno de dos buffers y luego sube seq: el audio nunca lee uno a medio escribir. */
 typedef struct {
     uint8_t n, gate, bass;
+    uint8_t trig;                        /* sube con cada pulsación: el pad vuelve a atacar (aunque sea el mismo acorde) */
     uint8_t notes[BL_MAX_NOTES];
 } snd_chord;
 static snd_chord snd_buf[2];
@@ -154,6 +155,7 @@ static volatile float snd_cut = 0.2f;    /* coeficiente del filtro (lo calcula e
 static volatile uint8_t plq_note[NPLQ], plq_vel[NPLQ];
 static volatile uint32_t plq_w;
 
+static uint8_t st_trig;                  /* cuántas pulsaciones (el UI); ver snd_chord.trig */
 static void publish(const bl_chord *c, int gate)
 {
     snd_chord *b = &snd_buf[(snd_seq + 1u) & 1u];
@@ -161,6 +163,7 @@ static void publish(const bl_chord *c, int gate)
     b->n = c->n;
     b->gate = (uint8_t)gate;
     b->bass = c->bass;
+    b->trig = st_trig;
     for (i = 0; i < c->n; i++)
         b->notes[i] = c->notes[i];
     snd_seq = snd_seq + 1u;
@@ -271,6 +274,9 @@ static void take_chord(const snd_chord *c)
 {
     int i, j, used[NPAD] = {0};
     int pad_gate = c->gate;               /* el pad, su propia capa: su volumen en HOME */
+    static uint8_t trig_seen;
+    int retrig = c->trig != trig_seen;    /* tecla pulsada otra vez: todo vuelve a atacar (el piano, la campana...) */
+    trig_seen = c->trig;
     if (c != &achord) {
         int k, same = c->n == achord.n && c->bass == achord.bass;
         for (k = 0; same && k < c->n; k++) same = c->notes[k] == achord.notes[k];
@@ -283,7 +289,7 @@ static void take_chord(const snd_chord *c)
             for (i = 0; i < c->n; i++)
                 if (pad[j].note == c->notes[i]) keep = 1;
         if (!keep) pad[j].gate = 0;
-        else used[j] = 1;
+        else { used[j] = 1; if (retrig) pad[j].stage = 0; }
     }
     if (pad_gate)
         for (i = 0; i < c->n; i++) {
@@ -303,7 +309,7 @@ static void take_chord(const snd_chord *c)
         }
     {
         int g = c->gate && !set.bp_on;        /* el bajo pulsado sustituye al sostenido */
-        if (g && (!bass_gate || c->bass != bass_note)) bass_stage = 0;   /* nota nueva: ataque */
+        if (g && (!bass_gate || c->bass != bass_note || retrig)) bass_stage = 0;   /* nota nueva: ataque */
         bass_gate = g;
         bass_note = c->bass;
     }
@@ -1013,6 +1019,7 @@ static struct {
     uint8_t redraw;
     uint8_t gate_hold_off;
     uint8_t q_pend;                      /* un acorde nuevo espera a su línea de la rejilla (CUADRAR) */
+    uint8_t repress;                     /* se pulsó una tecla de acorde: vuelve a sonar aunque sea el mismo */
     uint32_t q_sig, q_resets;
     int8_t q_deg;                        /* el acorde que espera (sigue esperando aunque se suelte la tecla) */
     uint8_t q_mods, q_inv;
@@ -1514,7 +1521,7 @@ static int quant_hold(int *degree, unsigned *mods, int *inv)
     float q, b = tp_beats, bps = (float)set.tempo / 60.0f;
     uint32_t sig;
     if (!set.quant || !st.gate || *degree < 0
-        || (*degree == st.degree && *mods == st.mods && *inv == st.inv)) {
+        || (*degree == st.degree && *mods == st.mods && *inv == st.inv && !st.repress)) {
         st.q_pend = 0;
         return 0;
     }
@@ -1550,7 +1557,7 @@ static void input(void)
     /* grados: el último pulsado manda */
     for (i = 0; i < NDEG; i++) {
         uint32_t bit = 1u << WK[i];
-        if ((keys & bit) && !(st.keys & bit)) st.deg_order[i] = ++st.deg_stamp;
+        if ((keys & bit) && !(st.keys & bit)) { st.deg_order[i] = ++st.deg_stamp; st.repress = 1; }
         if (!(keys & bit)) st.deg_order[i] = 0;
     }
     {
@@ -1564,6 +1571,7 @@ static void input(void)
     live_degree = degree;
     /* modificadores, inversiones y HOLD */
     for (i = 0; i < 8; i++) if (keys >> BK[i] & 1u) mods |= BK_MOD[i];
+    for (i = 0; i < 10; i++) if ((keys >> BK[i] & 1u) && !(st.keys >> BK[i] & 1u)) st.repress = 1;   /* modificadores e inversiones */
     if (keys >> BK[BK_INV1] & 1u) inv = 1;
     if (keys >> BK[BK_INV2] & 1u) inv = 2;
     {
@@ -1593,6 +1601,10 @@ static void input(void)
     }
     if (!from_seq) held = quant_hold(&degree, &mods, &inv);
     else st.q_pend = 0;
+    if (!held && st.repress) {               /* la pulsación entra: el pad vuelve a atacar, y el MIDI también */
+        st.repress = 0;
+        if (degree >= 0 && st.gate) { st_trig++; st.sig = ~0u; }
+    }
     seq_record(degree, mods, inv, live_degree >= 0 && !held);
     chord_update(degree, mods, inv);
 
