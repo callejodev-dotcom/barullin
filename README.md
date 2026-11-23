@@ -86,7 +86,13 @@ Sale la carpeta **Barullin Export**:
 - **Barullin.barullin**: la copia de seguridad de todo. `python3 base/tools/fm1_backup.py restore "Barullin
   Export/Barullin.barullin"` la devuelve al FM-1 (pregunta en su pantalla: SEL sí, HOME no).
 
-**Con tus sonidos** (Barullo Xuno, 7FM, Bombo… o lo que sea): en Ableton, haz un Live Set con pistas MIDI llamadas
+**Con los plugins de Barullo, solo**: de serie, cada proyecto sale con Barullo Xuno, 7FM y Bombo cargados, un kit de
+Ableton para la caja y el charles, y Barullo Verb y Ley en los retornos (el molde es `tools/ableton/barullo.als`). El
+sonido de cada parte se elige solo, según el que tenía la idea en el FM-1: el pad con el más parecido de Xuno (Cordas,
+Néboa, Metais, Órgano, Fondo 1984) o de 7FM (P.ELEC 1, CAMPAS TUB, CELESTA), el bajo con Baixo Barullo, el arpegio
+con Arpexo y el bombo con Barullo Bombo.
+
+**Con otros sonidos** (Barullo Xuno, 7FM, Bombo… o lo que sea): en Ableton, haz un Live Set con pistas MIDI llamadas
 **Acordes**, **Bajo**, **Arpegio** y **Batería**, ponle a cada una su instrumento y sus efectos (y, si quieres, efectos
 en los retornos: Barullo Verb, Barullo Ley), y guárdalo. Luego `--plantilla RUTA/AL/SET.als` (se recuerda para las
 siguientes veces): cada proyecto sale con esas pistas tal cual, con sus sonidos, y los clips de la idea dentro. La

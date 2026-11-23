@@ -325,7 +325,147 @@ def write_midi(path, title, tempo, ts, parts, beats):
 
 # ---------------------------------------------------------------- Ableton Live (12): de una plantilla
 TS_ID = lambda num, den: (num - 1) + 99 * {1: 0, 2: 1, 4: 2, 8: 3, 16: 4}[den]
-PART_COLOR = {"ACORDES": 24, "BAJO": 13, "ARPEGIO": 9, "BATERIA": 1}
+PART_COLOR = {"ACORDES": 24, "BAJO": 13, "ARPEGIO": 9, "BATERIA": 1, "BOMBO": 2}
+PARTS = ["ACORDES", "BAJO", "ARPEGIO", "BOMBO", "BATERIA"]
+
+# ---------------------------------------------------------------- los sonidos de Barullo (tools/ableton/barullo.als)
+# El molde trae Barullo Xuno, 7FM y Bombo cargados y un kit de Ableton (y Verb y Ley en los retornos). Cada parte sale
+# con su instrumento y el sonido que más se parece al del FM-1: el estado del plugin se reescribe (el XML de JUCE dentro
+# de ProcessorState) con el son elegido del banco del plugin.
+SOUND_NAME = ["CUERDAS", "NEBOA", "METAIS", "PIANO EL", "ORGANO", "SINTE 80", "CAMPANA", "CRISTAL"]
+FM7_FOR_SOUND = {3: 2, 6: 26, 7: 6}              # piano eléctrico: P.ELEC 1; campana: CAMPAS TUB; cristal: CELESTA
+XUNO_FOR_SOUND = {0: 8, 1: 88, 2: 0, 4: 24, 5: 72}   # Cordas, Néboa, Metais, Órgano, Fondo 1984
+XUNO_BASS, XUNO_ARP = 96, 73                      # Baixo Barullo, Arpexo
+XUNO_SLIDERS = ["lfoRate", "lfoDelay", "dcoLfo", "dcoPwm", "dcoNoise", "vcfFreq", "vcfRes", "vcfEnv", "vcfLfo", "vcfKybd",
+                "vcaLevel", "envA", "envD", "envS", "envR", "dcoSub"]
+
+
+def xuno_bank():
+    """los 128 sons de Barullo Xuno (o seu Banco.h, aquí copiado): [18 bytes do Juno-106], (portaOn, porta, modo)"""
+    path = os.path.join(HERE, "ableton", "xuno_banco.txt")
+    out = []
+    for line in open(path, encoding="utf-8"):
+        if line.strip() and not line.startswith("#"):
+            v = [int(x) for x in line.split("#")[0].split()]
+            out.append((v[:18], v[18:21] if len(v) >= 21 else None))
+    return out
+
+
+def xuno_params(p):
+    """o panel de Xuno para un son (PluginProcessor.cpp setPanel): {id: valor}"""
+    sw1, sw2 = p[16], p[17] & 0x1f
+    rng = 2 if sw1 & 4 else 1 if sw1 & 2 else 0
+    v = {XUNO_SLIDERS[i]: p[i] for i in range(16)}
+    v.update(range=rng, pulse=1 if sw1 & 0x08 else 0, saw=1 if sw1 & 0x10 else 0,
+             chorus=(2 if not (sw1 & 0x40) else 1) if not (sw1 & 0x20) else 0,
+             pwmMode=sw2 & 1, envPol=(sw2 >> 1) & 1, vcaMode=(sw2 >> 2) & 1, hpf=3 - ((sw2 >> 3) & 3))
+    return v, sw1 & 0x40
+
+
+XUNO_NORM = dict({k: 127 for k in XUNO_SLIDERS}, range=2, pulse=1, saw=1, chorus=2, pwmMode=1, envPol=1, vcaMode=1, hpf=3,
+                 porta=255, portaOn=1, poly=2)
+XUNO_INDEX = {k: i for i, k in enumerate(XUNO_SLIDERS + ["range", "pulse", "saw", "chorus", "pwmMode", "envPol", "vcaMode",
+                                                          "hpf", "volume", "tune", "porta", "portaOn", "bendDco",
+                                                          "bendVcf", "lfoMod", "poly"])}
+
+
+def plugin_state(track):
+    """(o elemento ProcessorState, a raíz XML do estado de JUCE, o que vai detrás) ou None"""
+    e = track.find("DeviceChain/DeviceChain/Devices/PluginDevice//ProcessorState")
+    if e is None or not (e.text or "").strip():
+        return None
+    b = bytes.fromhex(re.sub(r"\s", "", e.text))
+    if b[:4] != b"VC2!":
+        return None
+    n = struct.unpack("<I", b[4:8])[0]
+    try:
+        root = ET.fromstring(b[8:8 + n].rstrip(b"\x00").decode("utf-8"))
+    except ET.ParseError:
+        return None
+    return e, root, b[8 + n:]
+
+
+def put_plugin_state(e, root, tail):
+    xml = ('<?xml version="1.0" encoding="UTF-8"?>\n\n' + ET.tostring(root, encoding="unicode")).encode("utf-8")
+    hx = (b"VC2!" + struct.pack("<I", len(xml)) + xml + tail).hex().upper()
+    old = e.text
+    head = old[:len(old) - len(old.lstrip())]
+    foot = old[len(old.rstrip()):]
+    first = old.strip().split()[0]
+    w = len(first) or 80
+    indent = head.split("\n")[-1]
+    e.text = head + ("\n" + indent).join(hx[i:i + w] for i in range(0, len(hx), w)) + foot
+
+
+def set_xuno(track, patch):
+    st = plugin_state(track)
+    if not st:
+        return
+    e, root, tail = st
+    p, play = xuno_bank()[patch]
+    vals, level = xuno_params(p)
+    if play:
+        vals.update(portaOn=play[0], porta=play[1], poly=play[2])
+    for par in root.findall("PARAM"):
+        if par.get("id") in vals:
+            par.set("value", f"{float(vals[par.get('id')]):.1f}")
+    m = root.find("Memoria")
+    if m is not None:
+        m.set("patch", str(patch))
+        m.set("manual", "0")
+        m.set("chorusLevel", str(64 if level else 0))
+    put_plugin_state(e, root, tail)
+    for fp in track.findall(".//ParameterList/PluginFloatParameter"):   # (y lo que Live recuerda de cada parámetro)
+        vi = fp.find("VisualIndex")
+        idx = int(vi.get("Value")) if vi is not None else -1
+        for k, i in XUNO_INDEX.items():
+            if i == idx and k in vals:
+                fp.find("ParameterValue/Manual").set("Value", f"{vals[k] / XUNO_NORM[k]:.10g}")
+
+
+def set_7fm(track, voice):
+    st = plugin_state(track)
+    if not st:
+        return
+    e, root, tail = st
+    m = root.find("Memoria")
+    if m is None:
+        return
+    m.set("source", "int")                        # a memoria interna (os CLASICOS), a voz elixida
+    m.set("voice", str(voice))
+    if "edit" in m.attrib:
+        del m.attrib["edit"]
+    put_plugin_state(e, root, tail)
+
+
+def barullo_tracks(mtracks, sound):
+    """las pistas de Barullo de la plantilla, por parte, ya con su sonido: {parte: pista}"""
+    kinds = {}
+    for t in mtracks:
+        st = plugin_state(t)
+        if st:
+            kinds.setdefault(st[1].tag, t)
+        elif t.find("DeviceChain/DeviceChain/Devices/DrumGroupDevice") is not None:
+            kinds.setdefault("KIT", t)
+    if "BarulloXuno" not in kinds and "Barullo7FM" not in kinds:
+        return {}
+    out = {}
+    if sound in FM7_FOR_SOUND and "Barullo7FM" in kinds:
+        out["ACORDES"] = copy.deepcopy(kinds["Barullo7FM"])
+        set_7fm(out["ACORDES"], FM7_FOR_SOUND[sound])
+    elif "BarulloXuno" in kinds:
+        out["ACORDES"] = copy.deepcopy(kinds["BarulloXuno"])
+        set_xuno(out["ACORDES"], XUNO_FOR_SOUND.get(sound, 8))
+    if "BarulloXuno" in kinds:
+        out["BAJO"] = copy.deepcopy(kinds["BarulloXuno"])
+        set_xuno(out["BAJO"], XUNO_BASS)
+        out["ARPEGIO"] = copy.deepcopy(kinds["BarulloXuno"])
+        set_xuno(out["ARPEGIO"], XUNO_ARP)
+    if "BarulloBombo" in kinds:
+        out["BOMBO"] = copy.deepcopy(kinds["BarulloBombo"])
+    if "KIT" in kinds:
+        out["BATERIA"] = copy.deepcopy(kinds["KIT"])
+    return out
 POINTEE_TAGS = ("AutomationTarget", "ModulationTarget", "Pointee")
 
 
@@ -346,7 +486,9 @@ def save_als(root, path):
 def write_als(path, ideas_out, tpl=None, stage=4):
     """ideas_out: lista de 8 (None o (título, tempo, compás, partes, pulsos)); tpl: un Live Set de molde (de serie,
     tools/ableton/plantilla.als; mejor uno vacío guardado con tu propio Live: --plantilla)"""
-    tpl = tpl or os.path.join(HERE, "ableton", "plantilla.als")
+    if not tpl:                                   # de serie: la de los plugins de Barullo, si está; si no, la vacía
+        b = os.path.join(HERE, "ableton", "barullo.als")
+        tpl = b if os.path.exists(b) else os.path.join(HERE, "ableton", "plantilla.als")
     raw = open(tpl, "rb").read()
     root = ET.fromstring(gzip.decompress(raw) if raw[:2] == b"\x1f\x8b" else raw)
     if stage == 1:                                # (diagnóstico: la plantilla tal cual, pasada por aquí)
@@ -367,6 +509,19 @@ def write_als(path, ideas_out, tpl=None, stage=4):
         key = nm.strip().upper().replace("Í", "I").replace("í", "I")
         if key in ("ACORDES", "BAJO", "ARPEGIO", "BATERIA") and key not in named:
             named[key] = copy.deepcopy(t)
+    first_idea = next((x for x in ideas_out if x), None)
+    if not named and first_idea:                  # sin pistas con nombre: los plugins de Barullo, si los trae
+        named = barullo_tracks(mtracks, first_idea[5] if len(first_idea) > 5 else 0)
+    if "BOMBO" in named:                          # con Barullo Bombo: él lleva el bombo, el kit lo demás
+        fixed = []
+        for x in ideas_out:
+            if x:
+                ps = dict(x[3])
+                ps["BOMBO"] = [nt for nt in ps["BATERIA"] if nt[2] == 36]
+                ps["BATERIA"] = [nt for nt in ps["BATERIA"] if nt[2] != 36]
+                x = x[:3] + (ps,) + x[4:]
+            fixed.append(x)
+        ideas_out = fixed
     c = proto.find(".//MidiClip")
     clip_proto = copy.deepcopy(c) if c is not None else ET.fromstring(open(os.path.join(HERE, "ableton", "clip.xml"), "rb").read())
     gs = clip_proto.find("GrooveSettings/GrooveId")
@@ -399,8 +554,8 @@ def write_als(path, ideas_out, tpl=None, stage=4):
     scenes = ls.find("Scenes")
     nslots = len(proto.findall("DeviceChain/MainSequencer/ClipSlotList/ClipSlot"))
     first = next((x for x in ideas_out if x), None)
-    for pi, part in enumerate(["ACORDES", "BAJO", "ARPEGIO", "BATERIA"]):
-        if not any(x and x[3][part] for x in ideas_out):
+    for pi, part in enumerate(PARTS):
+        if not any(x and x[3].get(part) for x in ideas_out):
             continue
         t = copy.deepcopy(named.get(part, proto))
         t.set("Id", str(tid))
@@ -422,9 +577,9 @@ def write_als(path, ideas_out, tpl=None, stage=4):
         for si, x in enumerate(ideas_out[:nslots]):
             if stage < 3 or (stage == 3 and (si or pi)):   # (diagnóstico: sin clips, o uno solo)
                 continue
-            if not x or not x[3][part]:
+            if not x or not x[3].get(part):
                 continue
-            title, tempo, ts, parts, beats = x
+            title, tempo, ts, parts, beats = x[:5]
             clip = copy.deepcopy(clip_proto)
             clip.set("Id", "0")
             clip.set("Time", "0")
@@ -556,7 +711,7 @@ def main():
         parts, beats = render_idea(idea, L, max(1, a.vueltas))
         write_midi(os.path.join(a.salida, title + ".mid"), title, tempo, ts, parts, beats)
         p1, b1 = render_idea(idea, L, 1) if a.vueltas != 1 else (parts, beats)
-        out.append((title, tempo, ts, p1, b1))
+        out.append((title, tempo, ts, p1, b1, inf[II_SOUND]))
         print(f"  {title}.mid  ({b1:g} pulsos, " + ", ".join(k.lower() for k, v in parts.items() if v) + ")")
     if not any(out):
         raise SystemExit("no hay ideas guardadas (graba con REC y guarda con SAVE)")
