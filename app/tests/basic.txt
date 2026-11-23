@@ -7,6 +7,11 @@ expect quant 2
 turn ALGO -2
 wait 30
 expect quant 0
+# pad, bajo y arpegio vienen a 0; el guion sube pad y bajo como antes (80 % y 60 %)
+expect vol_pad 0
+turn K1 16
+turn K2 12
+wait 30
 # los efectos, apagados de serie
 expect dly_on 0
 expect rev_on 0

@@ -14,7 +14,7 @@
 #define SR 44100.0f
 
 /* ------------------------------------------------------------- ajustes --- */
-#define SET_MAGIC 0x42524C4Au            /* "BRLJ" */
+#define SET_MAGIC 0x42524C4Bu            /* "BRLK" */
 #define LOOP_MAX 64                      /* cambios de acorde en una idea */
 #define LOOP_STEPS 128                   /* 16 compases de corcheas */
 typedef struct { uint8_t step; int8_t degree; uint8_t mods; uint8_t inv; } loop_ev_t;
@@ -993,8 +993,8 @@ static void settings_defaults(void)
     set.bp_pat = 0;
     set.bp_len = 5;
     set.bp_oct = 0;
-    set.vol_pad = VOL_UNITY;
-    set.vol_bass = 12;                       /* 60 %: tapaba al pad */
+    set.vol_pad = 0;                         /* pad, bajo y arpegio, callados de serie: se suben en HOME */
+    set.vol_bass = 0;
     set.vol_arp = 0;                         /* el arpegio, callado hasta que se le sube */
     set.vol_strum = VOL_UNITY;
     set.dly_tone = 7;

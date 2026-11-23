@@ -12,7 +12,7 @@ Construido sobre [fm1-base](https://github.com/charlesvestal/fm1-base) de Charle
 | Teclas blancas 8–16 | Placa de rasgueo: cada tecla, una nota del acorde, de grave a agudo |
 | Teclas negras (mantener) | `m/M` `7` `maj7` · `sus2` `sus4` · `9` `6` `dim/aug` · `INV1` `INV2` |
 | Última tecla negra | STOP: pulsación corta para el acorde; mantenida un segundo activa o quita el HOLD (activado por defecto: el acorde sigue sonando al soltar) |
-| K1 / K2 / K3 / K4 | En la página principal (HOME): volumen del pad / del bajo / del arpegio / del rasgueo, en pasos del 5 % (una vuelta, de 0 a 100 %). Todo suena a la vez: lo que no quieras, a 0. El arpegio viene a 0 y suena en cuanto le subes el volumen |
+| K1 / K2 / K3 / K4 | En la página principal (HOME): volumen del pad / del bajo / del arpegio / del rasgueo, en pasos del 5 % (una vuelta, de 0 a 100 %). Todo suena a la vez: lo que no quieras, a 0. Pad, bajo y arpegio vienen a 0 (de serie solo suena el rasgueo): cada uno suena en cuanto le subes el volumen |
 | ALGORITHM (en HOME) | CUADRAR: con algo sonando, el acorde nuevo espera a la siguiente corchea, negra (de serie) o compás, y entra justo en la línea; así el ritmo y el arpegio nunca se cortan. Si lo pulsas un pelín tarde (hasta 60 ms), entra en el acto. AL MOMENTO: cambia nada más pulsar |
 | PRESET | Tipo de compás: 4/4, 3/4, 6/8, 5/4, 7/8. Agrupa el arpegio (4/4: 4+4; 3/4 y 6/8: 3+3; 5/4: 4+3+3; 7/8: 4+3), cierra las ideas a compases enteros y cuenta PLAY en él |
 
