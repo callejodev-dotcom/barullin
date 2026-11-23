@@ -1,0 +1,66 @@
+# Barullín en el simulador: base/tools/build.py app --host, luego
+#   app/build/host/barullin_host app/tests/basic.txt app/build/host
+wait 600
+shot boot.png
+# grado I en Do mayor: C E G
+key 0 down
+wait 50
+expect degree 0
+expect nnotes 3
+expect note0 60
+expect note1 64
+expect note2 67
+shot c.png
+key 0 up
+wait 50
+expect degree -1
+# grado vi (sexta tecla blanca = tecla 9), con 7 (segunda negra = tecla 3): Am7
+key 9 down
+key 3 down
+wait 50
+expect degree 5
+expect nnotes 4
+shot am7.png
+wav am7.wav
+wait 600
+wavstop
+expect peak_db_min -30
+key 3 up
+key 9 up
+wait 50
+# V con sus4 (quinta negra = tecla 10): Gsus4, y rasgueo (teclas 12, 14, 16)
+key 7 down
+key 10 down
+wait 50
+expect degree 4
+key 12 down 100 0
+wait 20
+key 14 down 100 0
+wait 20
+key 16 down 100 0
+wait 50
+shot gsus4.png
+key 12 up
+key 14 up
+key 16 up
+key 10 up
+key 7 up
+wait 50
+# K1 a Re, K2 a dórico: el grado I es Dm
+turn K1 2
+turn K2 1
+wait 50
+expect key 2
+expect mode 1
+key 0 down
+wait 50
+expect mods 0
+shot d_dorico.png
+key 0 up
+tap SAVE
+wait 30
+expect dirty 0
+reboot
+wait 600
+expect key 2
+expect mode 1

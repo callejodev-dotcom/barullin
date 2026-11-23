@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "id": "barullin",
+  "name": "Barullo",
+  "author": "callejodev",
+  "license": "AGPL-3.0",
+  "tagline": "acordes de bolsillo",
+  "description": "A HiChord-style chord instrument for the FM-1: seven keys play the chords of a key and mode, the black keys change them (minor, 7, maj7, sus, 9, 6, dim/aug, inversions), the rest of the white keys strum them, with smooth voice leading.",
+  "tags": ["synth"],
+  "source": "https://github.com/callejodev-dotcom/barullin",
+  "hardware": {
+    "models": ["FM-1"],
+    "flash": ["856014", "B36014"],
+    "features": ["bluetooth-midi", "usb-audio-in", "usb-audio-out", "velocity", "pressure", "screen-reader"]
+  },
+  "credits": "Built on fm1-base by Charles Vestal (MPL-2.0)."
+}
