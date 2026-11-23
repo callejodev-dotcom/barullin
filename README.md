@@ -22,7 +22,7 @@ Los knobs K1–K4 son de la página en la que estás. Cada botón recorre sus p�
 | Botón | Página | SEL | K1 | K2 | K3 | K4 |
 | --- | --- | --- | --- | --- | --- | --- |
 | ARP | Arpegiador | silencio rápido (a 0 y vuelta) | octavas (1–3) | modo (sube, baja, sube-baja, azar) | paso (1/8, 1/8T, 1/16) | duración (ALGORITHM: ciclo en el compás, grupos de 4, o libre) |
-| | Bajo pulsado | sí / no | paso (1/4, 1/8, 1/8T, 1/16) | patrón (nota, octavas, quinta) | duración | octava (−1, 0, +1) |
+| | Bajo pulsado | sí / no | paso (1/4, 1/8, 1/8T, 1/16) | patrón (nota, quinta, octava, acorde: las notas del que suena) | duración | octava (−1, 0, +1) |
 | FX | Delay | sí / no | tiempo al tempo (1/16–1/2) | repeticiones | tono de las repeticiones | mezcla |
 | | Reverb | sí / no | sala | tono | ancho estéreo | mezcla |
 | ENV | Pad, arpegio, bajo | — | ataque (2 ms–2 s) | caída (50 ms–3 s) | sostenido (0–100 %) | release (20 ms–4 s) |

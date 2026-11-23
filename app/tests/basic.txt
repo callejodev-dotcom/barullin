@@ -373,7 +373,7 @@ wait 400
 expect arp 1
 expect low_on 1
 expect high_on 1
-# octavas: el bajo alterna con su octava
+# quinta: el bajo alterna con su quinta
 tap ARP
 wait 30
 expect page 7

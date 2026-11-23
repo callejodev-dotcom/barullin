@@ -14,7 +14,7 @@
 #define SR 44100.0f
 
 /* ------------------------------------------------------------- ajustes --- */
-#define SET_MAGIC 0x42524C44u            /* "BRLD" */
+#define SET_MAGIC 0x42524C45u            /* "BRLE" */
 #define LOOP_MAX 64                      /* cambios de acorde en una idea */
 #define LOOP_STEPS 128                   /* 16 compases de corcheas */
 typedef struct { uint8_t step; int8_t degree; uint8_t mods; uint8_t inv; } loop_ev_t;
@@ -63,7 +63,7 @@ typedef struct {
     uint8_t benv_a, benv_d, benv_s, benv_r;   /* la del bajo (el de siempre y el arpegiado) */
     uint8_t bp_on;                       /* bajo pulsado: el bajo repite su nota al tempo */
     uint8_t bp_div;                      /* 0..3: 1/4 1/8 1/8T 1/16 */
-    uint8_t bp_pat;                      /* 0 la nota, 1 octavas, 2 quinta */
+    uint8_t bp_pat;                      /* 0 nota, 1 quinta, 2 octava, 3 acorde (las notas del que suena) */
     uint8_t bp_len;                      /* 1..9: duración de cada nota, en décimas del paso */
     int8_t bp_oct;                       /* -1..+1: la octava del bajo pulsado */
     uint8_t vol_pad, vol_bass, vol_arp, vol_strum;   /* 0..VOL_MAX: el volumen de cada capa (HOME) */
@@ -108,7 +108,7 @@ static const char *const PAGE_NAME[NPG] = {"", "ARPEGIADOR", "DELAY", "REVERB", 
                                            "BAJO PULSADO", "LFO PAD", "LFO ARP", "LFO BAJO", "GLOBAL"};
 static const char *const ARP_DIV_NAME[3] = {"1/8", "1/8T", "1/16"};
 static const char *const BP_DIV_NAME[4] = {"1/4", "1/8", "1/8T", "1/16"};
-static const char *const BP_PAT_NAME[3] = {"NOTA", "OCTAVAS", "QUINTA"};
+static const char *const BP_PAT_NAME[4] = {"NOTA", "QUINTA", "OCTAVA", "ACORDE"};
 static const char *const LFO_DEST_NAME[5] = {"NO", "FILTRO", "VOLUMEN", "AFINAR", "PANEO"};
 static const char *const LFO_PART_NAME[3] = {"PAD", "ARP", "BAJO"};
 static const char *lfo_dest_name(int part, int d) { return d == 1 && part != LFO_PAD ? "BRILLO" : LFO_DEST_NAME[d]; }
@@ -432,8 +432,21 @@ static float bp_step_len(void)
 static void bp_fire(float step, uint32_t idx)
 {
     int note = achord.bass;
-    /* octavas o quinta: la fundamental, siempre en el paso par de la rejilla (en el pulso) */
-    if (idx & 1u) note += set.bp_pat == 1 ? 12 : set.bp_pat == 2 ? 7 : 0;
+    if (set.bp_pat == 3) {                   /* acorde: sus notas en el grave, en grupos de 4 (3 en tresillos) */
+        int iv[BL_MAX_NOTES], n = 0, k, j, G = set.bp_div == 2 ? 3 : 4, pos;
+        for (k = 0; k < achord.n; k++) {     /* intervalos únicos sobre la fundamental, ordenados */
+            int d = ((achord.notes[k] - achord.bass) % 12 + 12) % 12, dup = 0;
+            for (j = 0; j < n; j++) if (iv[j] == d) dup = 1;
+            if (dup) continue;
+            for (j = n; j > 0 && iv[j - 1] > d; j--) iv[j] = iv[j - 1];
+            iv[j] = d;
+            n++;
+        }
+        pos = (int)(idx % (uint32_t)G);
+        if (n) note += iv[pos % n] + 12 * (pos / n);   /* con 3 notas: fundamental, tercera, quinta, octava */
+    } else if (idx & 1u) {                   /* quinta u octava: la fundamental, siempre en el pulso */
+        note += set.bp_pat == 1 ? 7 : set.bp_pat == 2 ? 12 : 0;
+    }
     bp_i++;
     note += 12 * set.bp_oct;
     arp_voice(clamp(note, 0, 127), 1, step, set.bp_len);
@@ -803,7 +816,7 @@ static void settings_load(void)
         || set.dly_mix > 10u || set.dly_div > 5u || set.dly_fb > 9u || set.rev_mix > 10u
         || set.dly_on > 1u || set.rev_on > 1u || set.rev_size > 9u || set.rev_tone > 9u
         || set.env_a > 9u || set.env_d > 9u || set.env_s > 10u || set.env_r > 9u
-        || set.aenv_a > 9u || set.aenv_d > 9u || set.aenv_s > 10u || set.aenv_r > 9u || set.bp_on > 1u || set.bp_div > 3u || set.bp_pat > 2u || set.bp_len < 1u || set.bp_len > 9u || set.bp_oct < -1 || set.bp_oct > 1
+        || set.aenv_a > 9u || set.aenv_d > 9u || set.aenv_s > 10u || set.aenv_r > 9u || set.bp_on > 1u || set.bp_div > 3u || set.bp_pat > 3u || set.bp_len < 1u || set.bp_len > 9u || set.bp_oct < -1 || set.bp_oct > 1
         || set.vol_pad > VOL_MAX || set.vol_bass > VOL_MAX || set.vol_arp > VOL_MAX || set.vol_strum > VOL_MAX || set.dly_tone > 9u || set.rev_width > 10u
         || !lfos_ok()
         || set.benv_a > 9u || set.benv_d > 9u || set.benv_s > 10u || set.benv_r > 9u
@@ -1389,7 +1402,7 @@ static void input(void)
                 set.bp_div = (uint8_t)clamp((int32_t)set.bp_div + e, 0, 3);
                 set_changed("BAJO PASO", BP_DIV_NAME[set.bp_div]);
             } else if (k == EN_K2) {
-                set.bp_pat = (uint8_t)clamp((int32_t)set.bp_pat + e, 0, 2);
+                set.bp_pat = (uint8_t)clamp((int32_t)set.bp_pat + e, 0, 3);
                 set_changed("BAJO PATRON", BP_PAT_NAME[set.bp_pat]);
             } else if (k == EN_K3) {
                 set.bp_len = (uint8_t)clamp((int32_t)set.bp_len + e, 1, 9);
