@@ -133,6 +133,14 @@ shot arp.png
 wait 800
 expect pad_on 0
 expect bass_on 0
+# HOME y luego ARP: vuelve a su página sin cambiar de modo
+tap HOME
+wait 30
+expect page 0
+tap ARP
+wait 30
+expect page 1
+expect arp 1
 # segunda pulsación: arpegio + pad (sin bajo); tercera: apagado
 tap ARP
 wait 400
@@ -222,6 +230,13 @@ wait 30
 expect rev_size 8
 expect rev 7
 shot fx_reverb.png
+# HOME y luego FX: vuelve a la reverb, donde estaba
+tap HOME
+wait 30
+expect page 0
+tap FX
+wait 30
+expect page 3
 key 0 down
 wait 30
 key 0 up

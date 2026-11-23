@@ -413,6 +413,7 @@ static struct {
     uint8_t redraw;
     uint8_t gate_hold_off;
     uint8_t arp_turned;
+    uint8_t fx_page;                     /* la última página de efectos (2 delay, 3 reverb): FX vuelve a ella */
     uint8_t page;                        /* de quién son K1..K4: 0 el acorde, 1 el arpegiador, 2 delay, 3 reverb */
     uint8_t rec;                         /* 0 no, 1 armado (espera el primer acorde), 2 grabando */
     uint8_t playing;
@@ -776,7 +777,11 @@ static void input(void)
             else if (!set.loop_len) app_say("PLAY", "GRABA CON REC");
             else seq_play(!st.playing);
         } else if (k == B_FX) {
-            st.page = st.page == 2 ? 3 : st.page == 3 ? 0 : 2;   /* delay, reverb, y vuelta */
+            if (st.page < 2)                 /* desde fuera: a la última página de efectos */
+                st.page = st.fx_page ? st.fx_page : 2;
+            else                             /* dentro: delay, reverb, y fuera */
+                st.page = st.page == 2 ? 3 : 0;
+            if (st.page) st.fx_page = st.page;
             app_say("FX", st.page == 2 ? "DELAY" : st.page == 3 ? "REVERB" : "NO");
         } else if (k == B_HOME) {
             st.page = 0;                     /* los knobs vuelven al acorde (el arpegio sigue) */
@@ -789,9 +794,14 @@ static void input(void)
     }
 
     if (!(btn >> B_ARP & 1u) && (st.btn >> B_ARP & 1u) && !st.arp_turned) {
-        set.arp = (uint8_t)((set.arp + 1u) % 3u);   /* solo, con pad, apagado */
-        st.page = set.arp ? 1 : 0;           /* encendido: los knobs son suyos; apagado: vuelven */
-        set_changed("ARPEGIO", set.arp == 1 ? "SOLO" : set.arp == 2 ? "+ PAD" : "NO");
+        if (set.arp && st.page != 1) {       /* encendido y con los knobs en otra parte: solo vuelve a su página */
+            st.page = 1;
+            app_say("ARPEGIO", set.arp == 1 ? "SOLO" : "+ PAD");
+        } else {
+            set.arp = (uint8_t)((set.arp + 1u) % 3u);   /* solo, con pad, apagado */
+            st.page = set.arp ? 1 : 0;       /* encendido: los knobs son suyos; apagado: vuelven */
+            set_changed("ARPEGIO", set.arp == 1 ? "SOLO" : set.arp == 2 ? "+ PAD" : "NO");
+        }
     }
 
     /* potenciómetros (con ARP mantenido, K1..K4 son del arpegiador) */
