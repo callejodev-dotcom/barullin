@@ -25,6 +25,7 @@ import copy
 import ctypes
 import gzip
 import os
+import re
 import struct
 import subprocess
 import sys
@@ -332,7 +333,10 @@ def is_pointee(tag):
 
 
 def save_als(root, path):
-    xml = b'<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="utf-8").split(b"?>", 1)[-1].lstrip()
+    """como lo escribe Live: los valores con comillas (el JSON de ViewData) entre comillas simples y sin &quot;"""
+    txt = ET.tostring(root, encoding="unicode")
+    txt = re.sub(r'="([^"]*&quot;[^"]*)"', lambda m: "='" + m.group(1).replace("&quot;", '"') + "'", txt)
+    xml = ('<?xml version="1.0" encoding="UTF-8"?>\n' + txt + "\n").encode("utf-8")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with gzip.open(path, "wb") as f:
         f.write(xml)
