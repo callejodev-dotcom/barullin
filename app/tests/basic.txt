@@ -356,6 +356,7 @@ key 0 up
 wait 400
 expect low_on 1
 expect high_on 0
+expect low_note_is_bass 1
 turn ALGO 1
 wait 400
 expect arp_dest 2

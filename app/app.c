@@ -48,7 +48,7 @@ typedef struct {
     uint8_t env_a, env_d, env_s, env_r;
     uint8_t aenv_a, aenv_d, aenv_s, aenv_r;   /* la envolvente del arpegio, igual */
     uint8_t benv_a, benv_d, benv_s, benv_r;   /* la del bajo (el de siempre y el arpegiado) */
-    uint8_t arp_dest;                    /* qué se arpegia: 0 agudo, 1 bajo, 2 los dos */  /* la envolvente del pad: ataque, caída (0..9), sostenido (0..10), release (0..9) */
+    uint8_t arp_dest;                    /* qué suena al paso: 0 el arpegio, 1 el bajo repitiendo su nota, 2 los dos */  /* la envolvente del pad: ataque, caída (0..9), sostenido (0..10), release (0..9) */
     uint8_t cur_bank;                    /* el banco elegido: REC graba en él, PLAY lo toca */
     loop_t bank[NBANK];
 } settings_t;
@@ -65,7 +65,7 @@ static const unsigned BK_MOD[8] = {BL_MOD_FLIP, BL_MOD_7, BL_MOD_MAJ7, BL_MOD_SU
 static const uint8_t WK[16] = PLAT_WHITE_KEYS, BK[11] = PLAT_BLACK_KEYS;
 static const char *const ARP_MODE_NAME[4] = {"SUBE", "BAJA", "S-B", "AZAR"};
 static const char *const ARP_DIV_NAME[3] = {"1/8", "1/8T", "1/16"};
-static const char *const ARP_DEST_NAME[3] = {"AGUDO", "BAJO", "LOS DOS"};
+static const char *const ARP_DEST_NAME[3] = {"ARPEGIO", "BAJO", "LOS DOS"};
 static const char *const DLY_DIV_NAME[6] = {"1/16", "1/8", "1/8.", "1/4", "1/4.", "1/2"};
 static const float DLY_BEATS[6] = {0.25f, 0.5f, 0.75f, 1.0f, 1.5f, 2.0f};
 #define NDEG 7
@@ -307,7 +307,7 @@ static void arp_fire(float step)
     int note = arp_note(arp_i++);
     if (note < 0) return;
     if (set.arp_dest != 1) arp_voice(note, 0, step);                         /* agudo */
-    if (set.arp_dest != 0) arp_voice(clamp(note - 24, 0, 127), 1, step);     /* bajo: dos octavas abajo */
+    if (set.arp_dest != 0) arp_voice(achord.bass, 1, step);                  /* bajo: repite su nota a cada paso */
     arp_steps++;
 }
 
@@ -1298,6 +1298,11 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "env_s")) *got = set.env_s;
     else if (!strcmp(what, "arp_dest")) *got = set.arp_dest;
     else if (!strcmp(what, "benv_s")) *got = set.benv_s;
+    else if (!strcmp(what, "low_note_is_bass")) {   /* todas las voces de bajo suenan la nota del bajo */
+        int j, ok = 1, any = 0;
+        for (j = 0; j < NPLK; j++) if (plk[j].low && plk[j].env > 0.01f) { any = 1; ok &= plk[j].note == achord.bass; }
+        *got = any && ok;
+    }
     else if (!strcmp(what, "low_on")) { int j, on = 0; for (j = 0; j < NPLK; j++) on |= plk[j].low && plk[j].env > 0.01f; *got = on; }
     else if (!strcmp(what, "high_on")) { int j, on = 0; for (j = 0; j < NPLK; j++) on |= !plk[j].low && plk[j].left >= 0 && plk[j].env > 0.01f; *got = on; }
     else if (!strcmp(what, "pad_on")) { int j, on = 0; for (j = 0; j < NPAD; j++) on |= pad[j].env > 0.01f; *got = on; }
