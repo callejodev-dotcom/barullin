@@ -14,7 +14,7 @@
 #define SR 44100.0f
 
 /* ------------------------------------------------------------- ajustes --- */
-#define SET_MAGIC 0x42524C3Cu            /* "BRL<" */
+#define SET_MAGIC 0x42524C3Du            /* "BRL=" */
 #define LOOP_MAX 64                      /* cambios de acorde en una idea */
 #define LOOP_STEPS 128                   /* 16 compases de corcheas */
 typedef struct { uint8_t step; int8_t degree; uint8_t mods; uint8_t inv; } loop_ev_t;
@@ -52,6 +52,10 @@ typedef struct {
     uint8_t bp_div;                      /* 0..3: 1/4 1/8 1/8T 1/16 */
     uint8_t bp_pat;                      /* 0 la nota, 1 octavas, 2 quinta */
     uint8_t bp_len;                      /* 1..9: duración de cada nota, en décimas del paso */
+    uint8_t lfo_dest;                    /* LFO sobre el pad: 0 no, 1 filtro, 2 volumen, 3 afinación, 4 paneo */
+    uint8_t lfo_rate;                    /* 0..15: 0,1 .. 10 Hz */
+    uint8_t lfo_depth;                   /* 0..10 */
+    uint8_t lfo_shape;                   /* 0 seno, 1 triángulo, 2 cuadrada, 3 azar */
     uint8_t cur_bank;                    /* el banco elegido: REC graba en él, PLAY lo toca */
     loop_t bank[NBANK];
 } settings_t;
@@ -70,6 +74,9 @@ static const char *const ARP_MODE_NAME[4] = {"SUBE", "BAJA", "S-B", "AZAR"};
 static const char *const ARP_DIV_NAME[3] = {"1/8", "1/8T", "1/16"};
 static const char *const BP_DIV_NAME[4] = {"1/4", "1/8", "1/8T", "1/16"};
 static const char *const BP_PAT_NAME[3] = {"NOTA", "OCTAVAS", "QUINTA"};
+static const char *const LFO_DEST_NAME[5] = {"NO", "FILTRO", "VOLUMEN", "AFINAR", "PANEO"};
+static const char *const LFO_SHAPE_NAME[4] = {"SENO", "TRIANG", "CUADRA", "AZAR"};
+static float lfo_hz(int r) { return 0.1f * fm_exp2f((float)r * (6.6439f / 15.0f)); }   /* 0,1 .. 10 Hz */
 static const char *const DLY_DIV_NAME[6] = {"1/16", "1/8", "1/8.", "1/4", "1/4.", "1/2"};
 static const float DLY_BEATS[6] = {0.25f, 0.5f, 0.75f, 1.0f, 1.5f, 2.0f};
 #define NDEG 7
@@ -348,6 +355,8 @@ static void bp_fire(float step)
 }
 
 static float e_att, e_dec, e_rel, e_sus;
+static float lfo_ph, trem_now = 1.0f, pan_now;
+static uint32_t lfo_rng = 0x2468ACEu;
 static float ae_att, ae_dec, ae_rel, ae_sus;   /* la del arpegio */
 static float be_att, be_dec, be_rel, be_sus;   /* la del bajo */
 
@@ -356,6 +365,26 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     uint32_t i, seq = snd_seq;
     int j;
     float cut = snd_cut;
+    float lfo_v = 0.0f, pitch_mul = 1.0f, trem = 1.0f, pan = 0.0f;
+    if (set.lfo_dest && set.lfo_depth) {
+        float depth = (float)set.lfo_depth / 10.0f, ph;
+        lfo_ph += lfo_hz(set.lfo_rate) * (float)n / SR;
+        if (lfo_ph >= 1.0f) { lfo_ph -= 1.0f; lfo_rng = lfo_rng * 1664525u + 1013904223u; }   /* azar: un valor por ciclo */
+        ph = lfo_ph;
+        switch (set.lfo_shape) {
+        case 1: lfo_v = ph < 0.5f ? 4.0f * ph - 1.0f : 3.0f - 4.0f * ph; break;
+        case 2: lfo_v = ph < 0.5f ? 1.0f : -1.0f; break;
+        case 3: lfo_v = (float)(lfo_rng >> 8 & 0xFFFFu) / 32767.5f - 1.0f; break;
+        default: lfo_v = fm_sinf(ph * 6.2831853f); break;
+        }
+        if (set.lfo_dest == 1) {             /* filtro: hasta dos octavas arriba y abajo */
+            float fc = 300.0f * fm_exp2f((float)set.bright * 0.25f + lfo_v * depth * 2.0f);
+            if (fc > 16000.0f) fc = 16000.0f;
+            cut = 1.0f - fm_expf(-6.2831853f * fc / SR);
+        } else if (set.lfo_dest == 2) trem = 1.0f - depth * (0.5f - 0.5f * lfo_v);       /* volumen */
+        else if (set.lfo_dest == 3) pitch_mul = fm_exp2f(lfo_v * depth * 0.5f / 12.0f);  /* hasta medio tono */
+        else pan = lfo_v * depth;                                                         /* paneo */
+    }
     float gain = (float)master_q12 / 4096.0f * 7000000.0f;
     float dmix = set.dly_on ? (float)set.dly_mix * 0.07f : 0.0f, dfb = set.dly_on ? (float)set.dly_fb * 0.09f : 0.0f;
     float rmix = set.rev_on ? (float)set.rev_mix * 0.12f : 0.0f, dtarget = dly_target();
@@ -444,16 +473,18 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
                 else v->env = e_sus + (v->env - e_sus) * e_dec;
             } else if (v->env > 0.0f) { v->env *= e_rel; if (v->env < 0.0001f) v->env = 0.0f; }
             if (v->env == 0.0f) continue;
-            v->p1 += v->i1; if (v->p1 >= 1.0f) v->p1 -= 1.0f;
-            v->p2 += v->i2; if (v->p2 >= 1.0f) v->p2 -= 1.0f;
+            v->p1 += v->i1 * pitch_mul; if (v->p1 >= 1.0f) v->p1 -= 1.0f;
+            v->p2 += v->i2 * pitch_mul; if (v->p2 >= 1.0f) v->p2 -= 1.0f;
             l += (2.0f * v->p1 - 1.0f) * v->env * 0.11f;
             r += (2.0f * v->p2 - 1.0f) * v->env * 0.11f;
         }
         /* filtro paso bajo de dos polos por canal: el pad, tibio */
         lp1[0] += (l - lp1[0]) * cut; lp2[0] += (lp1[0] - lp2[0]) * cut;
         lp1[1] += (r - lp1[1]) * cut; lp2[1] += (lp1[1] - lp2[1]) * cut;
-        l = lp2[0];
-        r = lp2[1];
+        trem_now += (trem - trem_now) * 0.002f;   /* el LFO de volumen y paneo, sin escalones */
+        pan_now += (pan - pan_now) * 0.002f;
+        l = lp2[0] * trem_now * (pan_now > 0.0f ? 1.0f - pan_now : 1.0f);
+        r = lp2[1] * trem_now * (pan_now < 0.0f ? 1.0f + pan_now : 1.0f);
         /* rasgueos: seno con algo de segundo armónico, que se apaga solo */
         for (j = 0; j < NPLK; j++) {
             plk_v *p = &plk[j];
@@ -589,6 +620,10 @@ static void settings_defaults(void)
     set.bp_div = 1;
     set.bp_pat = 0;
     set.bp_len = 5;
+    set.lfo_dest = 0;                        /* el LFO, apagado de serie */
+    set.lfo_rate = 6;
+    set.lfo_depth = 5;
+    set.lfo_shape = 0;
     set.benv_a = 3;                          /* el bajo, como sonaba: ~20 ms de ataque, ~65 ms de release */
     set.benv_d = 5;
     set.benv_s = 10;
@@ -621,6 +656,7 @@ static void settings_load(void)
         || set.dly_on > 1u || set.rev_on > 1u || set.rev_size > 9u || set.rev_tone > 9u
         || set.env_a > 9u || set.env_d > 9u || set.env_s > 10u || set.env_r > 9u
         || set.aenv_a > 9u || set.aenv_d > 9u || set.aenv_s > 10u || set.aenv_r > 9u || set.bp_on > 1u || set.bp_div > 3u || set.bp_pat > 2u || set.bp_len < 1u || set.bp_len > 9u
+        || set.lfo_dest > 4u || set.lfo_rate > 15u || set.lfo_depth > 10u || set.lfo_shape > 3u
         || set.benv_a > 9u || set.benv_d > 9u || set.benv_s > 10u || set.benv_r > 9u
         || set.cur_bank >= NBANK || !banks_ok())
         settings_defaults();
@@ -682,6 +718,21 @@ static void time_text(float sec, char *t)   /* "80ms", "1.2s" */
         text_cat(t, d);
         text_cat(t, "s");
     }
+}
+
+static void hz_text(float hz, char *t)       /* "0.5Hz", "10Hz" */
+{
+    if (hz < 9.95f) {
+        char d[4];
+        int32_t dh = (int32_t)(hz * 10.0f + 0.5f);
+        int_text(dh / 10, t);
+        text_cat(t, ".");
+        int_text(dh % 10, d);
+        text_cat(t, d);
+    } else {
+        int_text((int32_t)(hz + 0.5f), t);
+    }
+    text_cat(t, "Hz");
 }
 
 void app_say(const char *a, const char *b)
@@ -990,6 +1041,9 @@ static void input(void)
             } else {
                 app_say(t, REC_LOOP.len ? "" : "VACIO");
             }
+        } else if (k == B_LFO) {
+            st.page = st.page == 8 ? 0 : 8;  /* los knobs, al LFO (y vuelta) */
+            app_say("LFO", st.page == 8 ? LFO_DEST_NAME[set.lfo_dest] : "");
         } else if (k == B_SEL) {
             st.page = st.page == 7 ? 0 : 7;  /* los knobs, al bajo pulsado (y vuelta) */
             app_say("BAJO PULSADO", st.page == 7 ? (set.bp_on ? "SI" : "NO (K1)") : "");
@@ -1103,6 +1157,22 @@ static void input(void)
                 time_text(env_rel_s(*er), t);
                 set_changed("RELEASE", t);
             }
+        } else if (st.page == 8 && k >= EN_K1) {   /* LFO */
+            if (k == EN_K1) {
+                set.lfo_dest = (uint8_t)clamp((int32_t)set.lfo_dest + e, 0, 4);
+                set_changed("LFO", LFO_DEST_NAME[set.lfo_dest]);
+            } else if (k == EN_K2) {
+                set.lfo_rate = (uint8_t)clamp((int32_t)set.lfo_rate + e, 0, 15);
+                hz_text(lfo_hz(set.lfo_rate), t);
+                set_changed("LFO VELOCIDAD", t);
+            } else if (k == EN_K3) {
+                set.lfo_depth = (uint8_t)clamp((int32_t)set.lfo_depth + e, 0, 10);
+                int_text(set.lfo_depth * 10, t); text_cat(t, "%");
+                set_changed("LFO CANTIDAD", t);
+            } else {
+                set.lfo_shape = (uint8_t)clamp((int32_t)set.lfo_shape + e, 0, 3);
+                set_changed("LFO FORMA", LFO_SHAPE_NAME[set.lfo_shape]);
+            }
         } else if (st.page == 7 && k >= EN_K1) {   /* BAJO PULSADO */
             if (k == EN_K1) {
                 set.bp_on = e > 0;
@@ -1152,7 +1222,8 @@ static void input(void)
     {
         uint32_t lit = btn | (set_dirty ? 1u << B_SAVE : 0u) | (set.arp ? 1u << B_ARP : 0u)
                        | (st.page == 2 || st.page == 3 ? 1u << B_FX : 0u) | (st.page >= 4 && st.page <= 6 ? 1u << B_ENV : 0u)
-                       | (st.page == 7 ? 1u << B_SEL : 0u);
+                       | (st.page == 7 ? 1u << B_SEL : 0u)
+                       | (st.page == 8 ? 1u << B_LFO : 0u);
         if (st.playing || st.rec == 2) lit |= 1u << B_PLAY;
         if (st.rec == 2 || (st.rec == 1 && (plat_ms() / 250u) & 1u)) lit |= 1u << B_REC;   /* armado: parpadea */
         plat_play_red(st.rec == 2);
@@ -1288,7 +1359,18 @@ static void draw(void)
         chip(i * 34 + 1, 30, 33, d.name, st.gate && st.degree == i);
     }
     cv_rect(0, 64, 240, 1, C_LINE);
-    if (st.page == 7 && !(st.btn >> B_ARP & 1u)) {   /* los knobs del bajo pulsado */
+    if (st.page == 8 && !(st.btn >> B_ARP & 1u)) {   /* los knobs del LFO */
+        static const char *const LBL[4] = {"K1 DESTINO", "K2 VELOC", "K3 CANTID", "K4 FORMA"};
+        char v[4][12];
+        v[0][0] = 0; text_cat(v[0], LFO_DEST_NAME[set.lfo_dest]);
+        hz_text(lfo_hz(set.lfo_rate), v[1]);
+        int_text(set.lfo_depth * 10, v[2]); text_cat(v[2], "%");
+        v[3][0] = 0; text_cat(v[3], LFO_SHAPE_NAME[set.lfo_shape]);
+        for (i = 0; i < 4; i++) {
+            cv_text(4 + i * 60, 68, &FONT_XS, LBL[i], C_AMB);
+            cv_text(4 + i * 60, 81, &FONT_XS, v[i], C_WHITE);
+        }
+    } else if (st.page == 7 && !(st.btn >> B_ARP & 1u)) {   /* los knobs del bajo pulsado */
         static const char *const LBL[4] = {"BAJO", "K2 PASO", "K3 PATRON", "K4 LARGO"};
         char v[4][12];
         v[0][0] = 0; text_cat(v[0], set.bp_on ? "K1 SI" : "K1 NO");
@@ -1410,6 +1492,7 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "env_s")) *got = set.env_s;
     else if (!strcmp(what, "bp_on")) *got = set.bp_on;
     else if (!strcmp(what, "bp_pat")) *got = set.bp_pat;
+    else if (!strcmp(what, "lfo_dest")) *got = set.lfo_dest;
     else if (!strcmp(what, "benv_s")) *got = set.benv_s;
     else if (!strcmp(what, "low_note_is_bass")) {   /* todas las voces de bajo suenan la nota del bajo */
         int j, ok = 1, any = 0;

@@ -393,3 +393,23 @@ expect bass_on 1
 tap SEL
 wait 30
 expect page 0
+# --- LFO: apagado de serie; volumen (trémolo) lento y hondo ---
+expect lfo_dest 0
+tap LFO
+wait 30
+expect page 8
+turn K1 2
+turn K3 5
+wait 30
+expect lfo_dest 2
+shot lfo.png
+key 0 down
+wait 30
+key 0 up
+wav lfo.wav
+wait 3000
+wavstop
+turn K1 -2
+tap LFO
+wait 30
+expect page 0
