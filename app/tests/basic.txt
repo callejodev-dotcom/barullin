@@ -96,14 +96,17 @@ reboot
 wait 600
 expect key 2
 expect mode 1
-# --- arpegiador ---
+# --- arpegiador: ARP abre su página; K1 lo enciende (no, solo, +pad) ---
 expect arp 0
 tap ARP
 wait 30
-expect arp 1
-# encendido: los knobs son del arpegiador hasta HOME
 expect page 1
-turn K3 1
+expect arp 0
+turn K1 1
+wait 30
+expect arp 1
+# las octavas, en ALGORITHM; K1..K4 de la página no tocan la tonalidad
+turn ALGO 1
 wait 30
 expect key 2
 shot arp_page.png
@@ -122,40 +125,33 @@ wait 1500
 wavstop
 expect arp_moving 1
 expect peak_db_min -30
-# ARP mantenido: K1 cambia el modo y al soltar el arpegiador sigue encendido
-press ARP
-turn K1 2
+# HOME y luego ARP: vuelve a su página sin cambiar nada
+tap ARP
 wait 30
-shot arp_knobs.png
-release ARP
+expect page 1
+expect arp 1
+turn K2 2
 wait 30
 expect arp_mode 2
-expect arp 1
 shot arp.png
 # arpegio solo: ni pad ni bajo
 wait 800
 expect pad_on 0
 expect bass_on 0
-# HOME y luego ARP: vuelve a su página sin cambiar de modo
-tap HOME
-wait 30
-expect page 0
-tap ARP
-wait 30
-expect page 1
-expect arp 1
-# segunda pulsación: arpegio + pad (sin bajo); tercera: apagado
-tap ARP
+# K1 una más: arpegio + pad (sin bajo); dos menos: apagado
+turn K1 1
 wait 400
 expect arp 2
 expect pad_on 1
 expect bass_on 0
-tap ARP
+turn K1 -2
 wait 400
 expect arp 0
-expect page 0
+expect page 1
 expect pad_on 1
 expect bass_on 1
+tap HOME
+wait 30
 # --- ideas: REC graba los cambios de acorde, PLAY los repite (100 BPM: corchea = 300 ms) ---
 expect tempo 120
 turn SELECT -20
@@ -210,7 +206,7 @@ wait 600
 expect loop_len 8
 expect loop_n 2
 expect playing 0
-# --- efectos: FX una vez, delay; dos, reverb; tres, fuera ---
+# --- efectos: FX una vez, delay; dos, reverb; tres, delay otra vez (sin "fuera": se sale con HOME) ---
 tap FX
 wait 30
 expect page 2
@@ -248,6 +244,9 @@ wait 2500
 wavstop
 expect peak_db_min -30
 tap FX
+wait 30
+expect page 2
+tap HOME
 wait 30
 expect page 0
 # --- bancos: SEQ pasa de banco; cada uno, su idea ---
@@ -294,7 +293,7 @@ expect loop_len 8
 tap SEQ
 wait 30
 expect loop_len 8
-# --- ENV: la envolvente del pad; sostenido a 0, el acorde se apaga solo aunque siga pulsado ---
+# --- ENV: pad, arpegio, bajo, y vuelta al pad (se sale con HOME); sostenido a 0, el acorde se apaga solo ---
 tap ENV
 wait 30
 expect page 4
@@ -318,19 +317,6 @@ expect env_s 10
 tap ENV
 wait 30
 expect page 5
-tap ENV
-wait 30
-expect page 6
-tap ENV
-wait 30
-expect page 0
-# --- ENV dos veces: la envolvente del arpegio ---
-tap ENV
-wait 30
-expect page 4
-tap ENV
-wait 30
-expect page 5
 shot env_arp.png
 tap ENV
 wait 30
@@ -342,9 +328,21 @@ shot env_bajo.png
 turn K3 10
 tap ENV
 wait 30
+expect page 4
+tap HOME
+wait 30
 expect page 0
-# --- bajo pulsado: SEL, con sus propios knobs; independiente del arpegiador ---
-tap SEL
+# HOME y luego ENV: vuelve al pad, la última en la que estuvo
+tap ENV
+wait 30
+expect page 4
+tap HOME
+wait 30
+# --- bajo pulsado: la segunda página de ARP, con sus propios knobs ---
+tap ARP
+wait 30
+expect page 1
+tap ARP
 wait 30
 expect page 7
 turn K1 1
@@ -362,38 +360,37 @@ expect high_on 0
 expect bass_on 0
 expect low_note_is_bass 1
 shot bajo.png
-# y con el arpegiador a la vez, cada uno a su paso
+# ARP otra vez: el arpegiador (de la última a la primera); se enciende con K1 y suenan los dos
 tap ARP
+wait 30
+expect page 1
+turn K1 1
 wait 400
 expect arp 1
 expect low_on 1
 expect high_on 1
 # octavas: el bajo alterna con su octava
-tap SEL
+tap ARP
 wait 30
 expect page 7
 turn K3 1
 wait 30
 expect bp_pat 1
-tap ARP
-wait 30
-tap ARP
-wait 30
-tap ARP
-wait 30
-expect arp 0
-tap SEL
-wait 30
-expect page 7
 turn K1 -1
 wait 400
 expect bp_on 0
 expect low_on 0
+tap ARP
+wait 30
+expect page 1
+turn K1 -1
+wait 400
+expect arp 0
 expect bass_on 1
-tap SEL
+tap HOME
 wait 30
 expect page 0
-# --- LFO: apagado de serie; volumen (trémolo) lento y hondo ---
+# --- LFO: pad, arpegio, bajo, y vuelta (se sale con HOME); apagados de serie ---
 expect lfo_dest 0
 tap LFO
 wait 30
@@ -410,7 +407,6 @@ wav lfo.wav
 wait 3000
 wavstop
 turn K1 -2
-# LFO dos veces: el del arpegio; tres: el del bajo; cuatro: fuera
 tap LFO
 wait 30
 expect page 9
@@ -428,5 +424,8 @@ expect lfo_bass 3
 shot lfo_bajo.png
 turn K1 -3
 tap LFO
+wait 30
+expect page 8
+tap HOME
 wait 30
 expect page 0

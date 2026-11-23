@@ -12,15 +12,29 @@ Construido sobre [fm1-base](https://github.com/charlesvestal/fm1-base) de Charle
 | Teclas blancas 8–16 | Placa de rasgueo: cada tecla, una nota del acorde, de grave a agudo |
 | Teclas negras (mantener) | `m/M` `7` `maj7` · `sus2` `sus4` · `9` `6` `dim/aug` · `INV1` `INV2` |
 | Última tecla negra | STOP: pulsación corta para el acorde; mantenida un segundo activa o quita el HOLD (activado por defecto: el acorde sigue sonando al soltar) |
-| K1 / K2 / K3 / K4 | Tonalidad / modo / octava / brillo del pad |
+| K1 / K2 / K3 / K4 | En la página principal: tonalidad / modo / octava / brillo del pad |
 | PRESET | Encadenar acordes (voice leading) sí o no |
-| ARP (pulsar) | Por pasos: 1, solo arpegio (sin pad ni bajo); 2, arpegio + pad; 3, apagado. Encendido, K1–K4 son del arpegiador |
-| FX | Por pasos: 1, DELAY (K1 sí/no, K2 tiempo al tempo de 1/16 a 1/2, K3 repeticiones, K4 mezcla); 2, REVERB (K1 sí/no, K2 tamaño, K3 tono, K4 mezcla); 3, los knobs vuelven |
-| LFO | Por pasos: 1, LFO del pad; 2, del arpegio; 3, del bajo; 4, fuera. Cada uno: K1 destino (no, filtro en el pad o brillo en arpegio y bajo, volumen, afinar, paneo), K2 velocidad (0,1–10 Hz), K3 cantidad, K4 forma (seno, triángulo, cuadrada, azar). Apagados de serie |
-| SEL | Bajo pulsado: los knobs pasan a K1 sí/no, K2 paso (1/4, 1/8, 1/8T, 1/16), K3 patrón (nota, octavas, quinta), K4 duración. Independiente del arpegiador; MIDI canal 3. SEL otra vez los devuelve |
-| ENV | Por pasos: 1, envolvente del pad; 2, del arpegio; 3, del bajo (el de siempre y el arpegiado); 4, fuera. K1 ataque (2 ms–2 s), K2 caída (50 ms–3 s), K3 sostenido (0–100 %), K4 release (20 ms–4 s) |
-| HOME | Los knobs vuelven al acorde (el arpegio y los efectos siguen). Después, ARP o FX vuelven a la página donde estabas, sin cambiar nada |
-| ARP mantenido + K1 / K2 / K3 / K4 | Modo (sube, baja, sube-baja, azar) / paso (1/8, 1/8T, 1/16) / octavas (1–3) / duración de cada nota |
+
+### Páginas
+
+Los knobs K1–K4 son de la página en la que estás. Cada botón recorre sus páginas (de la última vuelve a la primera) y, si vienes de otra parte, te lleva a la última suya en la que estuviste. Lo que se enciende y se apaga va siempre en **K1**. **HOME** vuelve a la página principal; lo que suena sigue sonando.
+
+| Botón | Páginas | K1 | K2 | K3 | K4 |
+| --- | --- | --- | --- | --- | --- |
+| ARP | Arpegiador | no / solo / +pad | modo (sube, baja, sube-baja, azar) | paso (1/8, 1/8T, 1/16) | duración (octavas 1–3 en ALGORITHM) |
+| | Bajo pulsado | sí / no | paso (1/4, 1/8, 1/8T, 1/16) | patrón (nota, octavas, quinta) | duración |
+| FX | Delay | sí / no | tiempo al tempo (1/16–1/2) | repeticiones | mezcla |
+| | Reverb | sí / no | tamaño | tono | mezcla |
+| ENV | Pad, arpegio, bajo | ataque (2 ms–2 s) | caída (50 ms–3 s) | sostenido (0–100 %) | release (20 ms–4 s) |
+| LFO | Pad, arpegio, bajo | destino (no, filtro/brillo, volumen, afinar, paneo) | velocidad (0,1–10 Hz) | cantidad | forma (seno, triángulo, cuadrada, azar) |
+| HOME | Principal | tonalidad | modo | octava | brillo |
+
+El arpegiador y el bajo pulsado son independientes y van a la misma rejilla del tempo. Efectos y LFO vienen apagados de serie.
+
+### Más controles
+
+| Control | Qué hace |
+| --- | --- |
 | SELECT | Tempo (40–220 BPM) |
 | REC | Graba una idea: empieza con el primer acorde que toques; REC otra vez la cierra (a compases enteros) y la pone en bucle |
 | PLAY | Reproduce o para la idea del banco. Mientras suena, lo que toques en directo manda |
@@ -30,7 +44,7 @@ Construido sobre [fm1-base](https://github.com/charlesvestal/fm1-base) de Charle
 
 Los modificadores se combinan: `7` + `9` da maj9, m9 o 9 según el grado; `sus4` + `7` da 7sus4.
 
-**MIDI de salida** (USB y Bluetooth): rasgueo en el canal 1, acorde en el 2, bajo en el 3, arpegio en el 4; con el arpegiador encendido, reloj MIDI con start/stop.
+**MIDI de salida** (USB y Bluetooth): rasgueo en el canal 1, acorde en el 2, bajo en el 3 (también el pulsado), arpegio en el 4; con el arpegiador o el bajo pulsado encendidos, reloj MIDI con start/stop.
 
 ## Estructura
 
@@ -65,7 +79,8 @@ python3 base/tools/fm1_install.py app/build/barullin.fwsc         # instalar en 
 - [x] Arpegiador con reloj MIDI
 - [ ] Ritmos de acompañamiento
 - [x] Grabar y repetir ideas (REC / PLAY)
-- [ ] Reloj MIDI y start/stop para el directo
+- [x] Reloj MIDI y start/stop
+- [x] Bajo pulsado, envolventes y LFO por sonido
 - [x] Delay de rebote al tempo y reverb
 - [ ] Motor de pad tipo Juno (de Barullo Xuno)
 
