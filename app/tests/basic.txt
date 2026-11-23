@@ -314,4 +314,46 @@ wait 30
 expect env_s 10
 tap ENV
 wait 30
+expect page 5
+tap ENV
+wait 30
 expect page 0
+# --- ENV dos veces: la envolvente del arpegio ---
+tap ENV
+wait 30
+expect page 4
+tap ENV
+wait 30
+expect page 5
+shot env_arp.png
+tap ENV
+wait 30
+expect page 0
+# --- arpegiar el bajo: ALGORITHM en la página del arpegiador (agudo, bajo, los dos) ---
+tap ARP
+wait 30
+expect arp 1
+turn ALGO 1
+wait 30
+expect arp_dest 1
+key 25 down
+wait 30
+key 25 up
+key 0 down
+wait 30
+key 0 up
+wait 400
+expect low_on 1
+expect high_on 0
+turn ALGO 1
+wait 400
+expect arp_dest 2
+expect low_on 1
+expect high_on 1
+shot arp_dos.png
+turn ALGO -2
+tap ARP
+wait 30
+tap ARP
+wait 30
+expect arp 0

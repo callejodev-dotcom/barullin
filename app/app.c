@@ -14,7 +14,7 @@
 #define SR 44100.0f
 
 /* ------------------------------------------------------------- ajustes --- */
-#define SET_MAGIC 0x42524C38u            /* "BRL8" */
+#define SET_MAGIC 0x42524C39u            /* "BRL9" */
 #define LOOP_MAX 64                      /* cambios de acorde en una idea */
 #define LOOP_STEPS 128                   /* 16 compases de corcheas */
 typedef struct { uint8_t step; int8_t degree; uint8_t mods; uint8_t inv; } loop_ev_t;
@@ -45,7 +45,9 @@ typedef struct {
     uint8_t dly_on, rev_on;
     uint8_t rev_size;                    /* 0..9: tamaño de la sala */
     uint8_t rev_tone;                    /* 0..9: oscura .. brillante */
-    uint8_t env_a, env_d, env_s, env_r;  /* la envolvente del pad: ataque, caída (0..9), sostenido (0..10), release (0..9) */
+    uint8_t env_a, env_d, env_s, env_r;
+    uint8_t aenv_a, aenv_d, aenv_s, aenv_r;   /* la envolvente del arpegio, igual */
+    uint8_t arp_dest;                    /* qué se arpegia: 0 agudo, 1 bajo, 2 los dos */  /* la envolvente del pad: ataque, caída (0..9), sostenido (0..10), release (0..9) */
     uint8_t cur_bank;                    /* el banco elegido: REC graba en él, PLAY lo toca */
     loop_t bank[NBANK];
 } settings_t;
@@ -62,6 +64,7 @@ static const unsigned BK_MOD[8] = {BL_MOD_FLIP, BL_MOD_7, BL_MOD_MAJ7, BL_MOD_SU
 static const uint8_t WK[16] = PLAT_WHITE_KEYS, BK[11] = PLAT_BLACK_KEYS;
 static const char *const ARP_MODE_NAME[4] = {"SUBE", "BAJA", "S-B", "AZAR"};
 static const char *const ARP_DIV_NAME[3] = {"1/8", "1/8T", "1/16"};
+static const char *const ARP_DEST_NAME[3] = {"AGUDO", "BAJO", "LOS DOS"};
 static const char *const DLY_DIV_NAME[6] = {"1/16", "1/8", "1/8.", "1/4", "1/4.", "1/2"};
 static const float DLY_BEATS[6] = {0.25f, 0.5f, 0.75f, 1.0f, 1.5f, 2.0f};
 #define NDEG 7
@@ -103,7 +106,7 @@ static void pluck(int note, int vel)
 
 /* ---------------------------------------------------------------- audio --- */
 #define NPAD 6
-#define NPLK 8
+#define NPLK 12
 typedef struct { float p1, p2, i1, i2, env; int note, gate, stage; } pad_v;   /* stage: 0 ataque, 1 caída */
 
 /* los tiempos de la envolvente, en segundos (exponenciales: el knob se siente igual en todo su recorrido) */
@@ -114,6 +117,8 @@ typedef struct {
     float ph, inc, env, amp;
     int32_t left;                        /* arpegio: muestras que le quedan sonando; -1 un rasgueo (se apaga solo) */
     uint8_t note;
+    uint8_t stage;                       /* arpegio: 0 ataque, 1 caída */
+    uint8_t low;                         /* arpegio del bajo: seno grave, seco, MIDI canal 3 */
 } plk_v;
 static pad_v pad[NPAD];
 static plk_v plk[NPLK];
@@ -275,20 +280,28 @@ static int arp_note(uint32_t i)
     return clamp(achord.notes[k % n] + 12 * (k / n), 0, 127);
 }
 
-static void arp_fire(float step)
+static void arp_voice(int note, int low, float step)
 {
-    int note = arp_note(arp_i++);
     plk_v *p = &plk[plk_next++ % NPLK];
-    if (note < 0) return;
-    if (p->left > 0) midi_ch(0x80u, 4, p->note, 0);
+    if (p->left > 0) midi_ch(0x80u, p->low ? 3u : 4u, p->note, 0);
     p->ph = 0.0f;
     p->inc = note_inc(note);
-    p->amp = 0.26f;
-    p->env = 1.0f;
+    p->amp = low ? 0.34f : 0.26f;
+    p->env = 0.0f;
+    p->stage = 0;
+    p->low = (uint8_t)low;
     p->note = (uint8_t)note;
     p->left = (int32_t)(step * (float)set.arp_len / 10.0f);
     if (p->left < 1) p->left = 1;
-    midi_ch(0x90u, 4, (uint32_t)note, 100);
+    midi_ch(0x90u, low ? 3u : 4u, (uint32_t)note, 100);
+}
+
+static void arp_fire(float step)
+{
+    int note = arp_note(arp_i++);
+    if (note < 0) return;
+    if (set.arp_dest != 1) arp_voice(note, 0, step);                         /* agudo */
+    if (set.arp_dest != 0) arp_voice(clamp(note - 24, 0, 127), 1, step);     /* bajo: dos octavas abajo */
     arp_steps++;
 }
 
@@ -300,6 +313,7 @@ static void arp_release_all(void)
 }
 
 static float e_att, e_dec, e_rel, e_sus;
+static float ae_att, ae_dec, ae_rel, ae_sus;   /* la del arpegio */
 
 void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
 {
@@ -316,6 +330,10 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         e_dec = fm_expf(-1.0f / (env_dec_s(set.env_d) * SR));
         e_rel = fm_expf(-1.0f / (env_rel_s(set.env_r) * SR));
         e_sus = (float)set.env_s / 10.0f;
+        ae_att = 1.0f / (env_att_s(set.aenv_a) * SR);
+        ae_dec = fm_expf(-1.0f / (env_dec_s(set.aenv_d) * SR));
+        ae_rel = fm_expf(-1.0f / (env_rel_s(set.aenv_r) * SR));
+        ae_sus = (float)set.aenv_s / 10.0f;
     }
     if (seq != snd_seen) {
         snd_seen = seq;
@@ -339,7 +357,7 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     }
     { uint32_t pkt; int port; while (plat_midi_in(&pkt, &port)) {} }   /* (la entrada MIDI llegará más adelante) */
     for (i = 0; i < n; i++) {
-        float l = 0.0f, r = 0.0f, b, s;
+        float l = 0.0f, r = 0.0f, b, s, lowsum = 0.0f;
         if (set.arp) {
             clk_cnt -= 1.0f;
             if (clk_cnt <= 0.0f) { clk_cnt += SR * 60.0f / (float)set.tempo / 24.0f; midi_rt(0xF8u); }
@@ -368,14 +386,19 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         /* rasgueos: seno con algo de segundo armónico, que se apaga solo */
         for (j = 0; j < NPLK; j++) {
             plk_v *p = &plk[j];
-            if (p->env < 0.0005f) continue;
+            if (p->env < 0.0005f && p->left <= 0) continue;
             p->ph += p->inc; if (p->ph >= 1.0f) p->ph -= 1.0f;
-            s = (fm_sinf(p->ph * 6.2831853f) + 0.35f * fm_sinf(p->ph * 12.566371f)) * p->env * p->amp;
             if (p->left < 0) p->env *= 0.99990f;            /* rasgueo: se apaga solo */
-            else if (p->left > 0) {                           /* arpegio: suena su parte del paso */
-                p->env *= 0.99997f;
-                if (--p->left == 0) midi_ch(0x80u, 4, p->note, 0);
-            } else p->env *= 0.9990f;                         /* y se suelta rápido */
+            else if (p->left > 0) {                           /* arpegio: su envolvente mientras dura el paso */
+                if (p->stage == 0) { p->env += ae_att; if (p->env >= 1.0f) { p->env = 1.0f; p->stage = 1; } }
+                else p->env = ae_sus + (p->env - ae_sus) * ae_dec;
+                if (--p->left == 0) midi_ch(0x80u, p->low ? 3u : 4u, p->note, 0);
+            } else p->env *= ae_rel;                          /* y su release */
+            if (p->low) {                                     /* bajo arpegiado: seno, sin efectos */
+                lowsum += fm_sinf(p->ph * 6.2831853f) * p->env * p->amp;
+                continue;
+            }
+            s = (fm_sinf(p->ph * 6.2831853f) + 0.35f * fm_sinf(p->ph * 12.566371f)) * p->env * p->amp;
             l += s * 1.1f; r += s * 0.9f;
         }
         /* efectos: delay de rebote y reverb, sobre el pad, el rasgueo y el arpegio */
@@ -395,6 +418,7 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             l += reverb_ch(0, in) * rmix;
             r += reverb_ch(1, in) * rmix;
         }
+        l += lowsum; r += lowsum;            /* el bajo arpegiado, seco */
         /* bajo: un seno, seco */
         if (bass_gate) { bass_env += 1.0f / (0.02f * SR); if (bass_env > 1.0f) bass_env = 1.0f; }
         else bass_env *= 0.9997f;
@@ -480,6 +504,11 @@ static void settings_defaults(void)
     set.env_d = 5;
     set.env_s = 10;
     set.env_r = 5;                           /* ~0,4 s */
+    set.aenv_a = 0;                          /* el arpegio, como sonaba: golpe y caída larga */
+    set.aenv_d = 6;
+    set.aenv_s = 0;
+    set.aenv_r = 1;
+    set.arp_dest = 0;
     set.cur_bank = 0;
     {
         int b;
@@ -507,6 +536,7 @@ static void settings_load(void)
         || set.dly_mix > 10u || set.dly_div > 5u || set.dly_fb > 9u || set.rev_mix > 10u
         || set.dly_on > 1u || set.rev_on > 1u || set.rev_size > 9u || set.rev_tone > 9u
         || set.env_a > 9u || set.env_d > 9u || set.env_s > 10u || set.env_r > 9u
+        || set.aenv_a > 9u || set.aenv_d > 9u || set.aenv_s > 10u || set.aenv_r > 9u || set.arp_dest > 2u
         || set.cur_bank >= NBANK || !banks_ok())
         settings_defaults();
 }
@@ -864,8 +894,8 @@ static void input(void)
                 app_say(t, REC_LOOP.len ? "" : "VACIO");
             }
         } else if (k == B_ENV) {
-            st.page = st.page == 4 ? 0 : 4;  /* los knobs, a la envolvente del pad (y vuelta) */
-            app_say("ENVOLVENTE", st.page == 4 ? "PAD" : "NO");
+            st.page = st.page == 4 ? 5 : st.page == 5 ? 0 : 4;   /* la del pad, la del arpegio, y fuera */
+            app_say("ENVOLVENTE", st.page == 4 ? "PAD" : st.page == 5 ? "ARPEGIO" : "NO");
         } else if (k == B_FX) {
             if (st.page != 2 && st.page != 3)                 /* desde fuera: a la última página de efectos */
                 st.page = st.fx_page ? st.fx_page : 2;
@@ -951,24 +981,29 @@ static void input(void)
                 int_text(set.rev_mix * 10, t); text_cat(t, "%");
                 set_changed("REVERB MEZCLA", t);
             }
-        } else if (st.page == 4 && k >= EN_K1) {   /* ENVOLVENTE */
+        } else if ((st.page == 4 || st.page == 5) && k >= EN_K1) {   /* ENVOLVENTE: del pad o del arpegio */
+            uint8_t *ea = st.page == 4 ? &set.env_a : &set.aenv_a, *ed = st.page == 4 ? &set.env_d : &set.aenv_d;
+            uint8_t *es = st.page == 4 ? &set.env_s : &set.aenv_s, *er = st.page == 4 ? &set.env_r : &set.aenv_r;
             if (k == EN_K1) {
-                set.env_a = (uint8_t)clamp((int32_t)set.env_a + e, 0, 9);
-                time_text(env_att_s(set.env_a), t);
+                *ea = (uint8_t)clamp((int32_t)*ea + e, 0, 9);
+                time_text(env_att_s(*ea), t);
                 set_changed("ATAQUE", t);
             } else if (k == EN_K2) {
-                set.env_d = (uint8_t)clamp((int32_t)set.env_d + e, 0, 9);
-                time_text(env_dec_s(set.env_d), t);
+                *ed = (uint8_t)clamp((int32_t)*ed + e, 0, 9);
+                time_text(env_dec_s(*ed), t);
                 set_changed("CAIDA", t);
             } else if (k == EN_K3) {
-                set.env_s = (uint8_t)clamp((int32_t)set.env_s + e, 0, 10);
-                int_text(set.env_s * 10, t); text_cat(t, "%");
+                *es = (uint8_t)clamp((int32_t)*es + e, 0, 10);
+                int_text(*es * 10, t); text_cat(t, "%");
                 set_changed("SOSTENIDO", t);
             } else {
-                set.env_r = (uint8_t)clamp((int32_t)set.env_r + e, 0, 9);
-                time_text(env_rel_s(set.env_r), t);
+                *er = (uint8_t)clamp((int32_t)*er + e, 0, 9);
+                time_text(env_rel_s(*er), t);
                 set_changed("RELEASE", t);
             }
+        } else if (k == EN_ALGO && ((btn >> B_ARP & 1u) || st.page == 1)) {   /* qué se arpegia */
+            set.arp_dest = (uint8_t)clamp((int32_t)set.arp_dest + e, 0, 2);
+            set_changed("ARPEGIA", ARP_DEST_NAME[set.arp_dest]);
         } else if (k == EN_SELECT) {
             set.tempo = (uint8_t)clamp((int32_t)set.tempo + e, 40, 220);
             int_text(set.tempo, t);
@@ -1002,7 +1037,7 @@ static void input(void)
     plat_glow(1);
     {
         uint32_t lit = btn | (set_dirty ? 1u << B_SAVE : 0u) | (set.arp ? 1u << B_ARP : 0u)
-                       | (st.page == 2 || st.page == 3 ? 1u << B_FX : 0u) | (st.page == 4 ? 1u << B_ENV : 0u);
+                       | (st.page == 2 || st.page == 3 ? 1u << B_FX : 0u) | (st.page == 4 || st.page == 5 ? 1u << B_ENV : 0u);
         if (st.playing || st.rec == 2) lit |= 1u << B_PLAY;
         if (st.rec == 2 || (st.rec == 1 && (plat_ms() / 250u) & 1u)) lit |= 1u << B_REC;   /* armado: parpadea */
         plat_play_red(st.rec == 2);
@@ -1037,13 +1072,6 @@ static void draw(void)
     } else {
         int32_t x = cv_text(8, 7, &FONT_B, "BARULLIN", C_WHITE);
         if (set.hold) x = cv_text(x + 8, 9, &FONT_XS, "HOLD", C_AMB);
-        if (set.arp) {
-            char b[16] = "";
-            text_cat(b, set.arp == 2 ? "ARP+PAD " : "ARP ");
-            int_text(set.tempo, t);
-            text_cat(b, t);
-            cv_text(x + 8, 9, &FONT_XS, b, C_HI);
-        }
         key_text(t);
         cv_text(232 - text_w(&FONT_B, t), 7, &FONT_B, t, C_HI);
     }
@@ -1070,6 +1098,15 @@ static void draw(void)
                 }
                 cv_rect(x, y, 9, 9, fill);
             }
+        }
+        if (set.arp) {                       /* el arpegiador: modo, qué arpegia y tempo, a la derecha */
+            char b[24] = "", n[8];
+            text_cat(b, set.arp == 2 ? "ARP+PAD" : "ARP");
+            if (set.arp_dest) text_cat(b, set.arp_dest == 1 ? " BAJO" : " x2");
+            text_cat(b, " ");
+            int_text(set.tempo, n);
+            text_cat(b, n);
+            cv_text(234 - text_w(&FONT_XS, b), 44, &FONT_XS, b, C_HI);
         }
         if (st.rec || st.playing) {          /* REC / PLAY y compás.pulso */
             char b[16] = "";
@@ -1129,13 +1166,16 @@ static void draw(void)
         chip(i < 6 ? 2 + i * 40 : 2 + (i - 6) * 48, i < 6 ? 22 : 42, i < 6 ? 38 : 46, BK_LABEL[i], on);
     }
     cv_rect(0, 64, 240, 1, C_LINE);
-    if (st.page == 4 && !(st.btn >> B_ARP & 1u)) {   /* los knobs de la envolvente */
-        static const char *const LBL[4] = {"K1 ATAQUE", "K2 CAIDA", "K3 SOST", "K4 RELEASE"};
+    if ((st.page == 4 || st.page == 5) && !(st.btn >> B_ARP & 1u)) {   /* los knobs de una envolvente */
+        static const char *const LP[4] = {"PAD ATAQ", "PAD CAIDA", "PAD SOST", "PAD REL"};
+        static const char *const LA[4] = {"ARP ATAQ", "ARP CAIDA", "ARP SOST", "ARP REL"};
+        const char *const *LBL = st.page == 4 ? LP : LA;
+        int pa = st.page == 4;
         char v[4][12];
-        time_text(env_att_s(set.env_a), v[0]);
-        time_text(env_dec_s(set.env_d), v[1]);
-        int_text(set.env_s * 10, v[2]); text_cat(v[2], "%");
-        time_text(env_rel_s(set.env_r), v[3]);
+        time_text(env_att_s(pa ? set.env_a : set.aenv_a), v[0]);
+        time_text(env_dec_s(pa ? set.env_d : set.aenv_d), v[1]);
+        int_text((pa ? set.env_s : set.aenv_s) * 10, v[2]); text_cat(v[2], "%");
+        time_text(env_rel_s(pa ? set.env_r : set.aenv_r), v[3]);
         for (i = 0; i < 4; i++) {
             cv_text(4 + i * 60, 68, &FONT_XS, LBL[i], C_AMB);
             cv_text(4 + i * 60, 81, &FONT_XS, v[i], C_WHITE);
@@ -1234,6 +1274,9 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "rev_on")) *got = set.rev_on;
     else if (!strcmp(what, "rev_size")) *got = set.rev_size;
     else if (!strcmp(what, "env_s")) *got = set.env_s;
+    else if (!strcmp(what, "arp_dest")) *got = set.arp_dest;
+    else if (!strcmp(what, "low_on")) { int j, on = 0; for (j = 0; j < NPLK; j++) on |= plk[j].low && plk[j].env > 0.01f; *got = on; }
+    else if (!strcmp(what, "high_on")) { int j, on = 0; for (j = 0; j < NPLK; j++) on |= !plk[j].low && plk[j].left >= 0 && plk[j].env > 0.01f; *got = on; }
     else if (!strcmp(what, "pad_on")) { int j, on = 0; for (j = 0; j < NPAD; j++) on |= pad[j].env > 0.01f; *got = on; }
     else if (!strcmp(what, "bass_on")) *got = bass_env > 0.01f;
     else if (!strcmp(what, "playing")) *got = st.playing;
