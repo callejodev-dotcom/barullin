@@ -1509,7 +1509,7 @@ static void draw(void)
         }
         if (pg == PG_ARP) {
             char n[4];
-            lbl[0] = "K1 PAD"; lbl[1] = "K2 MODO"; lbl[2] = "K3 PASO"; lbl[3] = "K4 LARGO";
+            lbl[0] = "PAD"; lbl[1] = "MODO"; lbl[2] = "PASO"; lbl[3] = "LARGO";
             text_cat(v[0], set.arp_pad ? "SI" : "NO");
             text_cat(v[1], ARP_MODE_NAME[set.arp_mode]);
             text_cat(v[2], ARP_DIV_NAME[set.arp_div]);
@@ -1518,19 +1518,19 @@ static void draw(void)
             int_text(set.arp_oct, n);
             text_cat(head, n);
         } else if (pg == PG_BP) {
-            lbl[0] = "K1 PASO"; lbl[1] = "K2 PATRON"; lbl[2] = "K3 LARGO"; lbl[3] = "K4 OCTAVA";
+            lbl[0] = "PASO"; lbl[1] = "PATRON"; lbl[2] = "LARGO"; lbl[3] = "OCTAVA";
             text_cat(v[0], BP_DIV_NAME[set.bp_div]);
             text_cat(v[1], BP_PAT_NAME[set.bp_pat]);
             int_text(set.bp_len * 10, v[2]); text_cat(v[2], "%");
             int_text(set.bp_oct, v[3]);
         } else if (pg == PG_DLY) {
-            lbl[0] = "K1 TIEMPO"; lbl[1] = "K2 REPET"; lbl[2] = "K3 MEZCLA"; lbl[3] = "K4 TONO";
+            lbl[0] = "TIEMPO"; lbl[1] = "REPETIR"; lbl[2] = "MEZCLA"; lbl[3] = "TONO";
             text_cat(v[0], DLY_DIV_NAME[set.dly_div]);
             int_text(set.dly_fb * 10, v[1]); text_cat(v[1], "%");
             int_text(set.dly_mix * 10, v[2]); text_cat(v[2], "%");
             int_text(set.dly_tone + 1, v[3]);
         } else if (pg == PG_REV) {
-            lbl[0] = "K1 SALA"; lbl[1] = "K2 TONO"; lbl[2] = "K3 MEZCLA"; lbl[3] = "K4 ANCHO";
+            lbl[0] = "SALA"; lbl[1] = "TONO"; lbl[2] = "MEZCLA"; lbl[3] = "ANCHO";
             int_text(set.rev_size + 1, v[0]);
             int_text(set.rev_tone + 1, v[1]);
             int_text(set.rev_mix * 10, v[2]); text_cat(v[2], "%");
@@ -1540,7 +1540,7 @@ static void draw(void)
             int ed = pg == PG_ENV_PAD ? set.env_d : pg == PG_ENV_ARP ? set.aenv_d : set.benv_d;
             int es = pg == PG_ENV_PAD ? set.env_s : pg == PG_ENV_ARP ? set.aenv_s : set.benv_s;
             int er = pg == PG_ENV_PAD ? set.env_r : pg == PG_ENV_ARP ? set.aenv_r : set.benv_r;
-            lbl[0] = "K1 ATAQUE"; lbl[1] = "K2 CAIDA"; lbl[2] = "K3 SOST"; lbl[3] = "K4 RELEASE";
+            lbl[0] = "ATAQUE"; lbl[1] = "CAIDA"; lbl[2] = "SOSTENIDO"; lbl[3] = "RELEASE";
             time_text(env_att_s(ea), v[0]);
             time_text(env_dec_s(ed), v[1]);
             int_text(es * 10, v[2]); text_cat(v[2], "%");
@@ -1548,7 +1548,7 @@ static void draw(void)
         } else {                             /* LFO */
             int part = pg - PG_LFO_PAD;
             const lfo_t *L = &set.lfo[part];
-            lbl[0] = "K1 DESTINO"; lbl[1] = "K2 VELOC"; lbl[2] = "K3 CANTID"; lbl[3] = "K4 FORMA";
+            lbl[0] = "DESTINO"; lbl[1] = "VELOCIDAD"; lbl[2] = "CANTIDAD"; lbl[3] = "FORMA";
             text_cat(v[0], lfo_dest_name(part, L->dest));
             hz_text(lfo_hz(L->rate), v[1]);
             int_text(L->depth * 10, v[2]); text_cat(v[2], "%");
@@ -1560,7 +1560,7 @@ static void draw(void)
             cv_text(4 + i * 60, 81, &FONT_XS, v[i], C_WHITE);
         }
     } else {
-        static const char *const LBL[4] = {"K1 TONO", "K2 MODO", "K3 OCT", "K4 BRILLO"};
+        static const char *const LBL[4] = {"TONO", "MODO", "OCTAVA", "BRILLO"};
         char v[4][12];
         v[0][0] = 0; text_cat(v[0], bl_note_name(set.key, set.key));
         v[1][0] = 0; text_cat(v[1], MODE_NAME[set.mode]);
