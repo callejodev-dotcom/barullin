@@ -18,6 +18,7 @@ enum { OBJ_SETTINGS, OBJ_PANEL, OBJ_BLE, OBJ_IDEAS, OBJ_NOBJ };
 #define APP_BACKUP_MAGIC 0x4E4C5242u     /* "BRLN" */
 #define APP_BACKUP_VERSION 1u
 #define APP_BACKUP_WHAT "SUSTITUYE TODAS LAS IDEAS"
+#define APP_BATTERY_RAW                   /* plat_battery_raw: el porcentaje de la cabecera */
 int app_backup_playing(void);
 void app_backup_flush(void);
 void app_backup_hold(int on);
