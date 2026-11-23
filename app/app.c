@@ -437,7 +437,7 @@ static inline float drum_sample(float g_hat)
         sn_lp += (sn_hp - sn_lp) * 0.28f;
         sn_lp2 += (sn_lp - sn_lp2) * 0.28f;
         wires = sn_lp2 * ds_env * ds_env;    /* al cuadrado: pega fuerte y se corta seca, sin cola */
-        out += (body * 0.80f + wires * 1.45f + sn_lp * ds_click * 0.30f) * ds_amp * 0.95f;
+        out += (body * 1.05f + wires * 0.95f + sn_lp * ds_click * 0.25f) * ds_amp * 0.95f;
         ds_env *= 0.99960f;                  /* la bordonera: se apaga del todo en ~250 ms */
         ds_tone *= 0.99930f;                 /* el parche: ~30 ms, un golpe sordo, sin que cante */
         ds_bend *= 0.9980f;                  /* la afinación cae en ~10 ms */
