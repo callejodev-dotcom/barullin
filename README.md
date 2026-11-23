@@ -65,6 +65,29 @@ Los modificadores se combinan: `7` + `9` da maj9, m9 o 9 según el grado; `sus4`
 
 **MIDI de salida** (USB y Bluetooth): rasgueo en el canal 1, acorde en el 2, bajo en el 3 (también el pulsado), arpegio en el 4; con el arpegiador o el bajo pulsado encendidos, reloj MIDI con start/stop.
 
+## Sacar las ideas al ordenador (MIDI y Ableton Live)
+
+Las ideas se guardan con SAVE (y sobreviven a las actualizaciones del firmware). Para sacarlas, con el FM-1 conectado
+por USB, Barullín encendido y parado:
+
+```sh
+source .venv/bin/activate                       # (mido y python-rtmidi, como para instalar)
+python3 tools/barullin_export.py
+```
+
+Sale la carpeta **Barullin Export**:
+
+- **Idea N - … .mid**: cada idea en su MIDI, con ACORDES, BAJO, ARPEGIO y BATERÍA en pistas y canales separados
+  (2, 3, 4 y 10), su tempo y su compás. Es lo que toca el FM-1 con PLAY: el mismo motor de acordes, el bajo
+  (sostenido o pulsado), el arpegiador y el ritmo, con los ajustes de cada idea. `--vueltas 4` las repite.
+- **Barullin Project/Barullin.als**: un proyecto de Ableton Live 12, con una pista por parte y una **escena por idea**
+  (con su nombre, tempo y compás). Las pistas van sin instrumento: arrastra el que quieras a cada una.
+- **Barullin.barullin**: la copia de seguridad de todo. `python3 base/tools/fm1_backup.py restore "Barullin
+  Export/Barullin.barullin"` la devuelve al FM-1 (pregunta en su pantalla: SEL sí, HOME no).
+
+`--desde FICHERO.barullin` exporta de una copia ya hecha, sin el FM-1. Hace falta un compilador de C (en el Mac,
+`xcode-select --install`), porque usa el motor de acordes del firmware tal cual.
+
 ## Estructura
 
 ```
@@ -76,6 +99,7 @@ app/            el firmware (lo que se compila para el FM-1)
   tests/        guiones del simulador
 base/           fm1-base, como submódulo (no se toca)
 tests/          pruebas del motor en el ordenador
+tools/          barullin_export.py: las ideas a MIDI y a Ableton Live (y su plantilla)
 ```
 
 ## Compilar y probar

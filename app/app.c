@@ -20,7 +20,8 @@ void *memset(void *d, int c, unsigned n);
 #define SR 44100.0f
 
 /* ------------------------------------------------------------- ajustes --- */
-#define SET_MAGIC 0x42524C50u            /* "BRLP" */
+#define SET_MAGIC 0x42524C51u            /* "BRLQ" */
+#define SET_MAGIC_V1 0x42524C50u         /* "BRLP": la anterior, con las ideas dentro (se trae al actualizar) */
 #define LOOP_MAX 64                      /* cambios de acorde en una idea */
 #define LOOP_STEPS 128                   /* 16 compases de corcheas */
 typedef struct { uint8_t step; int8_t degree; uint8_t mods; uint8_t inv; } loop_ev_t;
@@ -52,6 +53,7 @@ typedef struct {
     uint8_t n;                           /* sus cambios de acorde */
     loop_ev_t ev[LOOP_MAX];
 } loop_t;
+/* la versión anterior ("BRLP": las ideas dentro de los ajustes), para traerla al actualizar */
 typedef struct {
     uint32_t magic;
     /* lo global (no cambia con el banco) */
@@ -100,6 +102,54 @@ typedef struct {
     lfo_t lfo[3];                        /* los tres LFO */
     uint8_t kit_end;                     /* (la marca: aquí acaba el sonido de la idea) */
     loop_t bank[NBANK];
+} settings_v1_t;
+typedef struct {
+    uint32_t magic;
+    /* lo global (no cambia con el banco) */
+    uint8_t lead;                        /* voice leading */
+    uint8_t quant;                       /* cuadrar los cambios de acorde: 0 al momento, 1 corchea, 2 negra, 3 compás */
+    uint8_t hold;                        /* el acorde sigue al soltar (por defecto, sí) */
+    uint8_t cur_bank;                    /* el banco elegido: REC graba en él, PLAY lo toca */
+    /* --- el sonido de la idea: cada banco tiene el suyo, de key a kit_end (ver kit_store / kit_load) --- */
+    uint8_t key;                         /* 0 = C .. 11 = B */
+    uint8_t mode;                        /* enum bl_mode */
+    int8_t octave;                       /* -2 .. +2 */
+    uint8_t bright;                      /* 0..20: el corte del filtro del pad */
+    uint8_t sound;                       /* el sonido del pad (GLO, K3): enum snd */
+    uint8_t arp_free;                    /* ciclo del arpegio: 0 en el compás (grupos de 4), 1 libre */
+    uint8_t meter;                       /* tipo de compás (PRESET): 4/4, 3/4, 6/8, 5/4, 7/8 */
+    uint8_t arp_mute_vol;                /* el volumen que tenía el arpegio antes de silenciarlo con SEL */
+    uint8_t arp_mode;                    /* 0 sube, 1 baja, 2 sube-baja, 3 azar */
+    uint8_t arp_div;                     /* 0 corcheas, 1 tresillos, 2 semicorcheas */
+    uint8_t arp_oct;                     /* 1..3 octavas */
+    uint8_t arp_len;                     /* 1..9: duración de cada nota, en décimas del paso */
+    uint8_t tempo;                       /* 40..220 BPM */
+    uint8_t fx_send[3][4];               /* 0..10: cuánto manda cada capa (pad, bajo, arpegio, rasgueo) a cada
+                                          * efecto (delay, delay libre, reverb) */
+    uint8_t dly_div;                     /* 0..5: 1/16 1/8 1/8. 1/4 1/4. 1/2 */
+    uint8_t dly_fb;                      /* 0..9: repeticiones */
+    uint8_t dly_on, rev_on;              /* 0: silenciado con SEL (suena si alguna capa le manda algo: FX_ON) */
+    uint8_t rev_size;                    /* 0..9: tamaño de la sala */
+    uint8_t rev_tone;                    /* 0..9: oscura .. brillante */
+    uint8_t env_a, env_d, env_s, env_r;  /* la envolvente del pad: ataque, caída (0..9), sostenido (0..10), release (0..9) */
+    uint8_t aenv_a, aenv_d, aenv_s, aenv_r;   /* la envolvente del arpegio, igual */
+    uint8_t benv_a, benv_d, benv_s, benv_r;   /* la del bajo (el de siempre y el arpegiado) */
+    uint8_t bp_on;                       /* bajo pulsado: el bajo repite su nota al tempo */
+    uint8_t bp_div;                      /* 0..3: 1/4 1/8 1/8T 1/16 */
+    uint8_t bp_pat;                      /* 0 nota, 1 quinta, 2 octava, 3 acorde (las notas del que suena) */
+    uint8_t bp_len;                      /* 1..9: duración de cada nota, en décimas del paso */
+    int8_t bp_oct;                       /* -1..+1: la octava del bajo pulsado */
+    uint8_t vol_pad, vol_bass, vol_arp, vol_strum;   /* 0..VOL_MAX: el volumen de cada capa (HOME) */
+    uint8_t dly_tone;                    /* 0..9: las repeticiones, de oscuras a brillantes */
+    uint8_t d2_on;                       /* el delay libre (FX, segunda página) */
+    uint16_t d2_ms;                      /* 10..750 ms */
+    uint8_t d2_fb, d2_tone;
+    uint8_t drm_kick, drm_snare, drm_hat;   /* caja de ritmos (EDIT): el volumen de cada parte, 0 callada */
+    uint8_t drm_hopen;                   /* la apertura del charles: 0 cerrado .. 10 abierto */
+    uint8_t drm_mute;                    /* SEL en su página: silencio (los volúmenes se guardan) */
+    uint8_t rev_width;                   /* 0..10: ancho estéreo de la reverb */
+    lfo_t lfo[3];                        /* los tres LFO */
+    uint8_t kit_end;                     /* (la marca: aquí acaba el sonido de la idea) */
 } settings_t;
 /* Lo que se guarda: los ajustes (con el sonido del banco que suena) y el sonido de cada banco. Un banco que
  * nunca se tocó (kit_used 0) empieza con todo de serie. */
@@ -112,6 +162,36 @@ typedef struct {
 } saved_t;
 static saved_t sv;
 #define set (sv.s)
+typedef struct {                         /* lo que guardaba la versión anterior (BRLP), para traerlo */
+    settings_v1_t s;
+    uint8_t kit_used[NBANK];
+    uint8_t kits[NBANK][KIT_SIZE];
+} saved_v1_t;
+
+/* Las ideas, en su propio objeto ("BRID"): sobreviven a las actualizaciones aunque cambien los ajustes, y llevan
+ * lo que hace falta para sacarlas al ordenador (tools/barullin_export.py): cada una, sus acordes y, en bytes
+ * sueltos (sin huecos: el formato de IDEA_INFO, abajo), su tono, tempo, compás, arpegiador, bajo y ritmo. */
+#define IDEAS_MAGIC 0x44495242u          /* "BRID" */
+#define IDEAS_VERSION 1u
+enum {                                   /* idea_t.info: el orden NO cambia (tools/barullin_export.py lo lee así) */
+    II_KEY, II_MODE, II_OCTAVE, II_TEMPO, II_METER, II_LEAD, II_SOUND,
+    II_VOL_PAD, II_VOL_BASS, II_VOL_ARP,
+    II_ARP_MODE, II_ARP_DIV, II_ARP_OCT, II_ARP_LEN, II_ARP_FREE,
+    II_BP_ON, II_BP_DIV, II_BP_PAT, II_BP_LEN, II_BP_OCT,
+    II_DRM_KICK, II_DRM_SNARE, II_DRM_HAT, II_DRM_HOPEN, II_DRM_MUTE,
+    II_N = 32
+};
+typedef struct {
+    loop_t loop;
+    uint8_t info[II_N];
+} idea_t;
+typedef struct {
+    uint32_t magic;
+    uint8_t version, nbank, rsv[2];
+    idea_t idea[NBANK];
+} ideas_t;
+static ideas_t ideas;
+typedef char ideas_fit[sizeof(ideas_t) <= PLAT_STORE_MAX ? 1 : -1];
 typedef char saved_fits[sizeof(saved_t) <= PLAT_STORE_MAX ? 1 : -1];   /* cabe en un objeto del almacén */
 static uint8_t set_dirty;
 
@@ -1303,7 +1383,7 @@ static void settings_defaults(void)
     set.cur_bank = 0;
     {
         int b;
-        for (b = 0; b < NBANK; b++) set.bank[b].len = set.bank[b].n = 0;
+        (void)b;
     }
 }
 
@@ -1319,20 +1399,27 @@ static int banks_ok(void)
 {
     int b;
     for (b = 0; b < NBANK; b++) {
-        const loop_t *L = &set.bank[b];
+        const loop_t *L = &ideas.idea[b].loop;
         if (L->len > LOOP_STEPS || L->n > LOOP_MAX || (L->len && !L->n)) return 0;
     }
     return 1;
 }
 
-static void settings_load(void)
+static void ideas_empty(void)
 {
-    if (plat_store_load(OBJ_SETTINGS, &sv, sizeof sv) != (int)sizeof sv || set.magic != SET_MAGIC
+    memset(&ideas, 0, sizeof ideas);
+    ideas.magic = IDEAS_MAGIC;
+    ideas.version = IDEAS_VERSION;
+    ideas.nbank = NBANK;
+}
+static int settings_ok(void)
+{
+    return !(set.magic != SET_MAGIC
         || set.key > 11u || set.mode >= BL_MODE_COUNT || set.octave < -2 || set.octave > 2
         || set.bright > 20u || set.lead > 1u || set.sound >= NSND || !fx_send_ok() || set.quant > 3u || set.hold > 1u
         || set.arp_mute_vol > VOL_MAX || set.arp_free > 1u || set.meter >= NMETER || set.arp_mode > 3u || set.arp_div > 2u || set.arp_oct < 1u || set.arp_oct > 3u
         || set.arp_len < 1u || set.arp_len > 9u || set.tempo < 40u || set.tempo > 220u
-        || set.dly_div > 5u || set.dly_fb > 9u 
+        || set.dly_div > 5u || set.dly_fb > 9u
         || set.dly_on > 1u || set.rev_on > 1u || set.rev_size > 9u || set.rev_tone > 9u
         || set.env_a > 9u || set.env_d > 9u || set.env_s > 10u || set.env_r > 9u
         || set.aenv_a > 9u || set.aenv_d > 9u || set.aenv_s > 10u || set.aenv_r > 9u || set.bp_on > 1u || set.bp_div > 3u || set.bp_pat > 3u || set.bp_len < 1u || set.bp_len > 9u || set.bp_oct < -1 || set.bp_oct > 1
@@ -1341,11 +1428,30 @@ static void settings_load(void)
         || set.drm_hat > VOL_MAX || set.drm_hopen > 10u || set.drm_mute > 1u || set.rev_width > 10u
         || !lfos_ok()
         || set.benv_a > 9u || set.benv_d > 9u || set.benv_s > 10u || set.benv_r > 9u
-        || set.cur_bank >= NBANK || !banks_ok()) {
-        settings_defaults();
-        memset(sv.kit_used, 0, sizeof sv.kit_used);
-    }
+        || set.cur_bank >= NBANK);
 }
+static void settings_load(void)
+{
+    static saved_v1_t v1;                /* (solo para traer la versión anterior) */
+    int got_ideas = plat_store_load(OBJ_IDEAS, &ideas, sizeof ideas) == (int)sizeof ideas
+                    && ideas.magic == IDEAS_MAGIC && ideas.version == IDEAS_VERSION && ideas.nbank == NBANK && banks_ok();
+    if (!got_ideas) ideas_empty();
+    if (plat_store_load(OBJ_SETTINGS, &sv, sizeof sv) == (int)sizeof sv && settings_ok()) return;
+    /* ¿la versión anterior? sus ajustes, sus sonidos y sus ideas (el sonido tiene el mismo formato) */
+    if (plat_store_load(OBJ_SETTINGS, &v1, sizeof v1) == (int)sizeof v1 && v1.s.magic == SET_MAGIC_V1) {
+        int b;
+        memcpy(&set, &v1.s, sizeof set);
+        set.magic = SET_MAGIC;
+        memcpy(sv.kit_used, v1.kit_used, sizeof sv.kit_used);
+        memcpy(sv.kits, v1.kits, sizeof sv.kits);
+        if (!got_ideas) for (b = 0; b < NBANK; b++) ideas.idea[b].loop = v1.s.bank[b];
+        if (settings_ok() && banks_ok()) { set_dirty = 1; return; }
+        ideas_empty();
+    }
+    settings_defaults();
+    memset(sv.kit_used, 0, sizeof sv.kit_used);
+}
+
 static int settings_valid(void)          /* el sonido que acaba de entrar, ¿tiene sentido? (los de los bancos) */
 {
     return !(set.key > 11u || set.mode >= BL_MODE_COUNT || set.octave < -2 || set.octave > 2
@@ -1678,8 +1784,8 @@ static void page_go(const uint8_t *pages, int n, uint8_t *mem)
 /* Se graban los cambios de acorde (grado, modificadores, inversión) en corcheas al tempo; el bucle dura
  * compases enteros. Las teclas en directo mandan sobre lo grabado mientras se mantienen. */
 static float eighth_ms(void) { return 30000.0f / (float)set.tempo; }
-#define REC_LOOP (set.bank[set.cur_bank])
-#define PLAY_LOOP (set.bank[st.play_bank])
+#define REC_LOOP (ideas.idea[set.cur_bank].loop)
+#define PLAY_LOOP (ideas.idea[st.play_bank].loop)
 static void seq_play(int on);
 static void cut_update(void);
 
@@ -1735,6 +1841,43 @@ static void bt_sel(void)
     if (bt_found_n()) plat_bta_pick(i - 1);
     else (void)plat_bta_reconnect(i - 1);
     app_say("CONECTANDO", nm);
+}
+
+/* las ideas, con lo de cada una para sacarlas al ordenador (idea_t.info) */
+static void idea_info(uint8_t *in, const settings_t *k)
+{
+    memset(in, 0, II_N);
+    in[II_KEY] = k->key; in[II_MODE] = k->mode; in[II_OCTAVE] = (uint8_t)k->octave; in[II_TEMPO] = k->tempo;
+    in[II_METER] = k->meter; in[II_LEAD] = set.lead; in[II_SOUND] = k->sound;
+    in[II_VOL_PAD] = k->vol_pad; in[II_VOL_BASS] = k->vol_bass; in[II_VOL_ARP] = k->vol_arp;
+    in[II_ARP_MODE] = k->arp_mode; in[II_ARP_DIV] = k->arp_div; in[II_ARP_OCT] = k->arp_oct; in[II_ARP_LEN] = k->arp_len;
+    in[II_ARP_FREE] = k->arp_free;
+    in[II_BP_ON] = k->bp_on; in[II_BP_DIV] = k->bp_div; in[II_BP_PAT] = k->bp_pat; in[II_BP_LEN] = k->bp_len;
+    in[II_BP_OCT] = (uint8_t)k->bp_oct;
+    in[II_DRM_KICK] = k->drm_kick; in[II_DRM_SNARE] = k->drm_snare; in[II_DRM_HAT] = k->drm_hat;
+    in[II_DRM_HOPEN] = k->drm_hopen; in[II_DRM_MUTE] = k->drm_mute;
+}
+static uint8_t backup_holding;           /* una copia de seguridad está saliendo: no se guarda nada */
+static int save_all(void)                /* SAVE: el sonido que suena a su banco, y todo a la memoria */
+{
+    static settings_t live, k;
+    int b, r;
+    if (backup_holding) return -1;
+    kit_store(st.kit_bank);
+    live = set;
+    for (b = 0; b < NBANK; b++) {        /* el sonido de cada banco (de serie si nunca se tocó) */
+        if (sv.kit_used[b]) memcpy((uint8_t *)&set + KIT_OFS, sv.kits[b], KIT_SIZE);
+        else { settings_defaults(); set.lead = live.lead; }
+        k = set;
+        set = live;
+        idea_info(ideas.idea[b].info, &k);
+    }
+    set = live;
+    ideas.magic = IDEAS_MAGIC;
+    ideas.version = IDEAS_VERSION;
+    ideas.nbank = NBANK;
+    r = plat_store_save(OBJ_SETTINGS, &sv, sizeof sv);
+    return r | plat_store_save(OBJ_IDEAS, &ideas, sizeof ideas);
 }
 
 /* el sonido pasa al del banco b (el que suena se guarda en el suyo) */
@@ -2025,8 +2168,7 @@ static void input(void)
             st.page = PG_MAIN;               /* los knobs vuelven al acorde (lo que suena sigue sonando) */
             app_say("HOME", "");
         } else if (k == B_SAVE) {
-            kit_store(set.cur_bank);         /* el sonido que suena, en su banco */
-            if (plat_store_save(OBJ_SETTINGS, &sv, sizeof sv) == 0) { set_dirty = 0; app_say("GUARDADO", ""); }
+            if (save_all() == 0) { set_dirty = 0; app_say("GUARDADO", ""); }
             else app_say("GUARDAR", "FALLO");
         }
     }
@@ -2349,7 +2491,7 @@ static void draw(void)
             int b;
             for (b = 0; b < NBANK; b++) {
                 int32_t x = 8 + b * 11, y = 46;
-                uint16_t fill = set.bank[b].len ? (st.playing && b == st.play_bank ? C_WHITE : C_HI) : C_LINE;
+                uint16_t fill = ideas.idea[b].loop.len ? (st.playing && b == st.play_bank ? C_WHITE : C_HI) : C_LINE;
                 if (b == set.cur_bank) {
                     uint16_t fr = (st.next_bank == b) ? C_AMB : C_WHITE;
                     cv_rect(x - 2, y - 2, 13, 13, fr);
@@ -2574,6 +2716,22 @@ static void draw(void)
     cv_blit(0, 144);
 }
 
+/* la copia de seguridad por USB (base/tools/fm1_backup.py, tools/barullin_export.py) */
+int app_backup_playing(void) { return st.playing || st.rec; }
+void app_backup_flush(void) { if (set_dirty && save_all() == 0) set_dirty = 0; }
+void app_backup_hold(int on) { backup_holding = (uint8_t)(on != 0); }
+void app_backup_restored(void)
+{
+    settings_load();
+    st.kit_bank = set.cur_bank;
+    st.playing = 0;
+    st.rec = 0;
+    cut_update();
+    set_dirty = 0;
+    st.redraw = 1;
+    app_say("IDEAS", "RESTAURADAS");
+}
+
 void app_ui_init(void)
 {
     plat_bta_on(1);                      /* Bluetooth: listo para buscar y conectar cascos o altavoces */
@@ -2639,6 +2797,7 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "drum_hits")) *got = drum_hits >= 4u;
     else if (!strcmp(what, "d2_ms")) *got = set.d2_ms;
     else if (!strcmp(what, "quant")) *got = set.quant;
+    else if (!strcmp(what, "idea_tempo")) *got = ideas.idea[set.cur_bank].info[II_TEMPO];
     else if (!strcmp(what, "bta")) *got = plat_bta_state();
     else if (!strcmp(what, "bt_pick")) *got = st.bt_pick;
     else if (!strcmp(what, "sound")) *got = set.sound;

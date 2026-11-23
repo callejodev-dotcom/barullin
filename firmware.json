@@ -11,7 +11,7 @@
   "hardware": {
     "models": ["FM-1"],
     "flash": ["856014", "B36014"],
-    "features": ["bluetooth-midi", "bluetooth-audio", "usb-audio-in", "usb-audio-out", "velocity", "pressure", "screen-reader"]
+    "features": ["bluetooth-midi", "bluetooth-audio", "usb-audio-in", "usb-audio-out", "velocity", "pressure", "screen-reader", "backup"]
   },
   "credits": "Built on fm1-base by Charles Vestal (MPL-2.0)."
 }
