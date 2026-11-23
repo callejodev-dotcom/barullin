@@ -337,16 +337,16 @@ wait 30
 expect env_s 10
 tap ENV
 wait 30
-expect page 5
-shot env_arp.png
-tap ENV
-wait 30
 expect page 6
 turn K3 -10
 wait 30
 expect benv_s 0
 shot env_bajo.png
 turn K3 10
+tap ENV
+wait 30
+expect page 5
+shot env_arp.png
 tap ENV
 wait 30
 expect page 4

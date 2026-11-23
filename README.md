@@ -23,13 +23,13 @@ Los knobs K1–K4 son de la página en la que estás. Cada botón recorre sus p�
 | Botón | Página | SEL | K1 | K2 | K3 | K4 |
 | --- | --- | --- | --- | --- | --- | --- |
 | ARP | Arpegiador | silencio rápido (a 0 y vuelta) | octavas (1–3) | modo (sube, baja, sube-baja, azar) | paso (1/8, 1/8T, 1/16) | duración (ALGORITHM: ciclo en el compás, grupos de 4, o libre) |
-| | Bajo pulsado | sí / no | paso (1/4, 1/8, 1/8T, 1/16) | patrón (nota, quinta, octava, acorde: las notas del que suena) | duración | octava (−1, 0, +1) |
+| | Bajo pulsado | sí / no (si el bajo está a 0, lo sube al 60 %) | paso (1/4, 1/8, 1/8T, 1/16) | patrón (nota, quinta, octava, acorde: las notas del que suena) | duración | octava (−1, 0, +1) |
 | FX | Delay (a tempo, rebote estéreo) | sí / no | tiempo (1/16–1/2) | repeticiones | tono de las repeticiones | mezcla de la capa elegida |
 | | Delay libre (en ms) | sí / no | tiempo (10–750 ms) | repeticiones | tono | mezcla de la capa elegida |
 | | Reverb | sí / no | sala | tono | ancho estéreo | mezcla de la capa elegida |
 | ENV | Envolvente (ALGORITHM: de pad, arpegio o bajo) | — | ataque (2 ms–2 s) | caída (50 ms–3 s) | sostenido (0–100 %) | release (20 ms–4 s) |
 | LFO | LFO 1, 2, 3 (ALGORITHM: destino, ver abajo) | sí / no | velocidad (0,1–10 Hz) | cantidad | forma (seno, triángulo, cuadrada, azar) | a tempo (libre, 1/16 a 4 compases) |
-| EDIT | Ritmo | silencio rápido | bombo (a negras) | caja (en el 2 y el 4) | charles (a corcheas) | apertura del charles (de cerrado a abierto) |
+| EDIT | Ritmo | silencio rápido (con todo a 0, pone un ritmo básico) | bombo (a negras) | caja (en el 2 y el 4) | charles (a corcheas) | apertura del charles (de cerrado a abierto) |
 | GLO | Global | — | tonalidad | modo | sonido del pad (ver abajo; carga su envolvente, que luego tocas en ENV) | brillo (ALGORITHM: encadenar acordes sí/no) |
 | HOME | Principal | — | volumen pad | volumen bajo | volumen arpegio | volumen rasgueo |
 

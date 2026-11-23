@@ -1160,7 +1160,8 @@ static struct {
     uint8_t gate_hold_off;
     uint8_t q_pend;                      /* un acorde nuevo espera a su línea de la rejilla (CUADRAR) */
     uint8_t repress;
-    uint8_t fx_layer;                    /* FX: la capa cuyo envío lleva K4 (ALGORITHM la elige) */                     /* se pulsó una tecla de acorde: vuelve a sonar aunque sea el mismo */
+    uint8_t fx_layer;
+    uint8_t hinted;                      /* el aviso de "sube el volumen", ya dado */                    /* FX: la capa cuyo envío lleva K4 (ALGORITHM la elige) */                     /* se pulsó una tecla de acorde: vuelve a sonar aunque sea el mismo */
     uint32_t q_sig, q_resets;
     int8_t q_deg;                        /* el acorde que espera (sigue esperando aunque se suelte la tecla) */
     uint8_t q_mods, q_inv;
@@ -1449,6 +1450,10 @@ static void chord_update(int degree, unsigned mods, int inv)
     }
     st.gate = gate;
     if (gate) chord_notes_on();
+    if (gate && !st.hinted && !set.vol_pad && !set.vol_bass && !set.vol_arp) {   /* suena nada: dónde se sube */
+        st.hinted = 1;
+        app_say("SIN VOLUMEN", "HOME: K1 K2 K3");
+    }
     publish(&st.cur, gate);
     st.redraw = 1;
 }
@@ -1498,7 +1503,7 @@ static const char *page_state(int pg)    /* lo que se dice al entrar: si está e
     case PG_DLY: return set.dly_on ? "SI" : "NO";
     case PG_REV: return set.rev_on ? "SI" : "NO";
     case PG_DLY2: return set.d2_on ? "SI" : "NO";
-    case PG_DRUM: return set.drm_mute ? "SILENCIO" : DRUM_ON ? "SI" : "SUBE UN VOLUMEN";
+    case PG_DRUM: return set.drm_mute ? "SILENCIO" : DRUM_ON ? "SI" : "NO  SEL: BASICO";
     case PG_LFO_PAD: case PG_LFO_ARP: case PG_LFO_BASS:
         return set.lfo[pg - PG_LFO_PAD].on ? LFO_DEST_NAME[set.lfo[pg - PG_LFO_PAD].dest % NDEST] : "NO";
     default: return "";
@@ -1529,7 +1534,10 @@ static void sel_toggle(void)
         if (ARP_ON) { set.arp_mute_vol = set.vol_arp; set.vol_arp = 0; }
         else set.vol_arp = set.arp_mute_vol ? set.arp_mute_vol : VOL_UNITY;
         break;
-    case PG_BP: set.bp_on = !set.bp_on; break;
+    case PG_BP:
+        set.bp_on = !set.bp_on;
+        if (set.bp_on && !set.vol_bass) { set.vol_bass = 12; app_say("BAJO PULSADO", "SI  (BAJO AL 60%)"); return; }
+        break;
     case PG_DLY:
         if (!set.dly_on) {                   /* sin ecos viejos al volver */
             uint32_t z;
@@ -1543,7 +1551,15 @@ static void sel_toggle(void)
         set.d2_on = !set.d2_on;
         break;
     case PG_LFO_PAD: case PG_LFO_ARP: case PG_LFO_BASS: set.lfo[pg - PG_LFO_PAD].on = !set.lfo[pg - PG_LFO_PAD].on; break;
-    case PG_DRUM: set.drm_mute = !set.drm_mute; break;
+    case PG_DRUM:
+        if (!DRUM_ON && !set.drm_mute) {     /* todo a 0: SEL pone un ritmo básico */
+            set.drm_kick = 16; set.drm_snare = 14; set.drm_hat = 10;
+            set_dirty = 1;
+            app_say("RITMO", "SI  (BASICO)");
+            return;
+        }
+        set.drm_mute = !set.drm_mute;
+        break;
     case PG_ENV_PAD: case PG_ENV_ARP: case PG_ENV_BASS: app_say("ENVOLVENTE", "SIEMPRE ACTIVA"); return;
     default: app_say("SEL", "EN ARP, FX O LFO"); return;   /* (HOME y GLO: nada que encender) */
     }
@@ -1834,7 +1850,7 @@ static void input(void)
             static const uint8_t P[3] = {PG_DLY, PG_DLY2, PG_REV};
             page_go(P, 3, &st.mem_fx);
         } else if (k == B_ENV) {             /* envolventes: pad, arpegio, bajo */
-            static const uint8_t P[3] = {PG_ENV_PAD, PG_ENV_ARP, PG_ENV_BASS};
+            static const uint8_t P[3] = {PG_ENV_PAD, PG_ENV_BASS, PG_ENV_ARP};
             page_go(P, 3, &st.mem_env);
         } else if (k == B_LFO) {             /* LFO: pad, arpegio, bajo */
             static const uint8_t P[3] = {PG_LFO_PAD, PG_LFO_ARP, PG_LFO_BASS};
@@ -1930,7 +1946,9 @@ static void input(void)
                 fx_send_knob(e, t);
             }
         } else if (st.page >= PG_ENV_PAD && st.page <= PG_ENV_BASS && k == EN_ALGO) {   /* ENV: de quién (pad, arpegio, bajo) */
-            st.page = (uint8_t)clamp((int32_t)st.page + e, PG_ENV_PAD, PG_ENV_BASS);
+            static const uint8_t ORD[3] = {PG_ENV_PAD, PG_ENV_BASS, PG_ENV_ARP};   /* pad, bajo, arpegio: como en HOME */
+            int q = st.page == PG_ENV_PAD ? 0 : st.page == PG_ENV_BASS ? 1 : 2;
+            st.page = ORD[clamp(q + e, 0, 2)];
             st.mem_env = st.page;
             app_say("ENVOLVENTE", st.page == PG_ENV_PAD ? "PAD" : st.page == PG_ENV_ARP ? "ARPEGIO" : "BAJO");
         } else if (st.page >= PG_ENV_PAD && st.page <= PG_ENV_BASS && k >= EN_K1) {   /* ENVOLVENTE: del pad, del arpegio o del bajo */
@@ -2030,7 +2048,7 @@ static void input(void)
             } else {
                 set.bright = (uint8_t)clamp((int32_t)set.bright + e, 0, 20);
                 cut_update();
-                int_text(set.bright * 5, t);
+                int_text(set.bright * 5, t); text_cat(t, "%");
                 set_changed("BRILLO", t);
             }
         } else if (page_fx(st.page) >= 0 && k == EN_ALGO) {   /* FX: qué capa lleva K4 (pad, bajo, arpegio, rasgueo) */
@@ -2141,7 +2159,7 @@ static void draw(void)
             if (set.bp_on) text_cat(b, "BAJO ");
             int_text(set.tempo, n);
             text_cat(b, n);
-            text_cat(b, " ");
+            text_cat(b, " BPM  ");
             text_cat(b, MT->name);
             cv_text(234 - text_w(&FONT_XS, b), 44, &FONT_XS, b, C_HI);
         }
@@ -2240,7 +2258,7 @@ static void draw(void)
             text_cat(v[0], bl_note_name(set.key, set.key));
             text_cat(v[1], MODE_NAME[set.mode]);
             text_cat(v[2], SOUND[set.sound % NSND].name);
-            int_text(set.bright * 5, v[3]);
+            int_text(set.bright * 5, v[3]); text_cat(v[3], "%");
         } else if (pg == PG_BP) {
             lbl[0] = "PASO"; lbl[1] = "PATRON"; lbl[2] = "LARGO"; lbl[3] = "OCTAVA";
             text_cat(v[0], BP_DIV_NAME[set.bp_div]);
@@ -2291,10 +2309,11 @@ static void draw(void)
         {
             int32_t x = cv_text(4, 50, &FONT_XS, head, page_active(pg) ? C_HI : C_GRAY);
             if (pg >= PG_ENV_PAD && pg <= PG_ENV_BASS) {   /* de quién es (ALGORITHM), resaltado */
-                static const char *const WHO[3] = {"PAD", "ARPEGIO", "BAJO"};
+                static const char *const WHO[3] = {"PAD", "BAJO", "ARP"};
+                static const uint8_t WP[3] = {PG_ENV_PAD, PG_ENV_BASS, PG_ENV_ARP};
                 int q;
                 x += 8;
-                for (q = 0; q < 3; q++) x = cv_text(x, 50, &FONT_XS, WHO[q], PG_ENV_PAD + q == pg ? C_HI : C_GRAY) + 6;
+                for (q = 0; q < 3; q++) x = cv_text(x, 50, &FONT_XS, WHO[q], WP[q] == pg ? C_HI : C_GRAY) + 6;
             }
             if (page_fx(pg) >= 0) {          /* los envíos de las cuatro capas; la de K4, resaltada */
                 static const char *const AB[4] = {"PAD ", "BAJO ", "ARP ", "RAS "};
@@ -2323,12 +2342,13 @@ static void draw(void)
         int_text(set.vol_strum * 100 / VOL_MAX, v[3]); text_cat(v[3], "%");
         {
             char q[24] = "CUADRAR ";
+            int32_t x = cv_text(4, 50, &FONT_XS, "VOLUMEN", C_GRAY);
             text_cat(q, QUANT_NAME[set.quant]);
-            cv_text(4, 50, &FONT_XS, q, set.quant ? C_AMB : C_GRAY);
+            cv_text(x + 10, 50, &FONT_XS, q, set.quant ? C_HI : C_GRAY);
         }
         for (i = 0; i < 4; i++) {
-            cv_text(4 + i * 60, 68, &FONT_XS, LBL[i], C_GRAY);
-            cv_text(4 + i * 60, 81, &FONT_XS, v[i], C_HI);
+            cv_text(4 + i * 60, 68, &FONT_XS, LBL[i], C_AMB);
+            cv_text(4 + i * 60, 81, &FONT_XS, v[i], C_WHITE);
         }
     }
     cv_blit(0, 144);
