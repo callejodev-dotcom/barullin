@@ -110,10 +110,11 @@ expect arp 0
 tap SEL
 wait 30
 expect arp 1
-# las octavas, en ALGORITHM; K1..K4 de la página no tocan la tonalidad
-turn ALGO 1
+# K1, las octavas; los knobs de la página no tocan la tonalidad
+turn K1 1
 wait 30
 expect key 2
+turn K1 -1
 shot arp_page.png
 tap HOME
 wait 30
