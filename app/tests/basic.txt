@@ -417,8 +417,8 @@ tap LFO
 wait 30
 expect page 8
 tap SEL
-turn K1 1
-turn K3 5
+turn ALGO 1
+turn K2 5
 wait 30
 expect lfo_dest 1
 shot lfo.png
@@ -433,7 +433,7 @@ tap LFO
 wait 30
 expect page 9
 tap SEL
-turn K1 1
+turn ALGO 1
 wait 30
 expect lfo_arp 6
 expect lfo_dest -1
@@ -442,7 +442,7 @@ tap LFO
 wait 30
 expect page 10
 tap SEL
-turn K1 2
+turn ALGO 2
 wait 30
 expect lfo_bass 12
 shot lfo_bajo.png
@@ -635,7 +635,7 @@ tap LFO
 wait 30
 expect page 10
 tap SEL
-turn K1 4
+turn ALGO 4
 wait 30
 expect lfo_bass 16
 tap SEL

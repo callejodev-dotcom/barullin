@@ -27,17 +27,21 @@ Los knobs K1–K4 son de la página en la que estás. Cada botón recorre sus p�
 | FX | Delay (a tempo, rebote estéreo) | sí / no | tiempo (1/16–1/2) | repeticiones | tono de las repeticiones | mezcla de la capa elegida |
 | | Delay libre (en ms) | sí / no | tiempo (10–750 ms) | repeticiones | tono | mezcla de la capa elegida |
 | | Reverb | sí / no | sala | tono | ancho estéreo | mezcla de la capa elegida |
-| ENV | Pad, arpegio, bajo | — | ataque (2 ms–2 s) | caída (50 ms–3 s) | sostenido (0–100 %) | release (20 ms–4 s) |
-| LFO | LFO 1, 2, 3 | sí / no | destino (ver abajo) | velocidad (0,1–10 Hz) | cantidad | forma (seno, triángulo, cuadrada, azar) |
+| ENV | Envolvente (ALGORITHM: de pad, arpegio o bajo) | — | ataque (2 ms–2 s) | caída (50 ms–3 s) | sostenido (0–100 %) | release (20 ms–4 s) |
+| LFO | LFO 1, 2, 3 (ALGORITHM: destino, ver abajo) | sí / no | velocidad (0,1–10 Hz) | cantidad | forma (seno, triángulo, cuadrada, azar) | a tempo (libre, 1/16 a 4 compases) |
 | EDIT | Ritmo | silencio rápido | bombo (a negras) | caja (en el 2 y el 4) | charles (a corcheas) | apertura del charles (de cerrado a abierto) |
-| GLO | Global | — | tonalidad | modo | sonido del pad: sierras, cuerdas, órgano, piano eléctrico, campana, cristal, pulso (carga su envolvente, que luego tocas en ENV) | brillo del pad (ALGORITHM: encadenar acordes sí/no) |
+| GLO | Global | — | tonalidad | modo | sonido del pad (ver abajo; carga su envolvente, que luego tocas en ENV) | brillo (ALGORITHM: encadenar acordes sí/no) |
 | HOME | Principal | — | volumen pad | volumen bajo | volumen arpegio | volumen rasgueo |
 
 Pad, bajo, arpegio y rasgueo son capas independientes que suenan a la vez; cada una tiene su volumen en HOME. El bajo pulsado sustituye al sostenido mientras está encendido. El arpegiador y el bajo pulsado van a la misma rejilla del tempo. Van siempre con la rejilla del compás, que arranca con el primer acorde: los cambios de acorde caen en ella (CUADRAR), y si uno llega hasta 60 ms tarde, ese paso se repite con él. Con CUADRAR en AL MOMENTO, cada acorde nuevo arranca el arpegio y el bajo en el acto. Efectos y LFO vienen apagados de serie.
 
 Cada efecto lleva su mezcla por capas: en sus páginas, ALGORITHM elige la capa (pad, bajo, arpegio o rasgueo) y K4 cuánto manda esa capa al efecto. Arriba se ven las cuatro (P, B, A, R; la que lleva K4, resaltada). De serie, pad, arpegio y rasgueo van a los efectos y el bajo va seco.
 
-Los tres LFO son generales: cada uno mueve lo que le digas, y dos pueden ir al mismo sitio. Destinos: pad (filtro, volumen, afinación, paneo, desafine), arpegio (volumen, afinación, paneo, brillo, largo de las notas), bajo (volumen, afinación, brillo, largo), delay (mezcla, tiempo: efecto cinta), delay libre (tiempo), reverb (mezcla), ritmo (volumen, charles) y volumen total.
+**ALGORITHM, en todo el firmware**, elige a qué afecta la página: en FX, la capa cuya mezcla lleva K4; en ENV, de quién es la envolvente; en LFO, el destino. (En ARP, el ciclo; en GLO, encadenar; en HOME, cuadrar.)
+
+**Los sonidos del pad** (GLO, K3), a la manera de Barullo Xuno y Barullo 7FM. El pad es parafónico, como un Juno con un solo filtro: cada voz es un DCO (sierra y pulso sin aliasing, PWM y sub una octava abajo), pasan juntas por un filtro resonante que se abre con cada acorde y por el chorus de dos BBD del Juno-106 (I o II), que lo abre en estéreo. CUERDAS (chorus I), NÉBOA (sierra, PWM y sub, chorus II), METAIS (el filtro se abre al atacar), PIANO EL (FM de 7FM: cuerpo 1:1 que ladra al golpe y el diente 14:1, una octava abajo, vuelve a tocar en cada compás), ÓRGANO (pulso y sub), SINTE 80 (pulso estrecho, resonancia, filtro que pica), CAMPANA (FM 3,5:1) y CRISTAL. El arpegio y el rasgueo son FM 2:1 (brillan al golpe), y el bajo, sierra y seno por un filtro que se abre con cada nota.
+
+Los tres LFO son generales: cada uno mueve lo que le digas, y dos pueden ir al mismo sitio. Destinos: pad (filtro, volumen, afinación, paneo, desafine), arpegio (volumen, afinación, paneo, brillo, largo de las notas), bajo (volumen, afinación, brillo, largo), delay (mezcla, tiempo: efecto cinta), delay libre (tiempo), reverb (mezcla), ritmo (volumen, charles), volumen total y agudos de todo (un filtro que los cierra). PAD CHORUS mueve la profundidad del chorus.
 
 ### Más controles
 
@@ -90,8 +94,7 @@ python3 base/tools/fm1_install.py app/build/barullin.fwsc         # instalar en 
 - [x] Reloj MIDI y start/stop
 - [x] Bajo pulsado, envolventes y tres LFO con 21 destinos
 - [x] Delay de rebote al tempo, delay libre en ms y reverb
-- [x] Siete sonidos de pad (GLO)
-- [ ] Motor de pad tipo Juno (de Barullo Xuno)
+- [x] Ocho sonidos de pad: DCO, filtro y chorus tipo Juno (de Barullo Xuno) y FM (de Barullo 7FM)
 
 ## Licencia
 
