@@ -14,7 +14,7 @@
 #define SR 44100.0f
 
 /* ------------------------------------------------------------- ajustes --- */
-#define SET_MAGIC 0x42524C43u            /* "BRLC" */
+#define SET_MAGIC 0x42524C44u            /* "BRLD" */
 #define LOOP_MAX 64                      /* cambios de acorde en una idea */
 #define LOOP_STEPS 128                   /* 16 compases de corcheas */
 typedef struct { uint8_t step; int8_t degree; uint8_t mods; uint8_t inv; } loop_ev_t;
@@ -44,6 +44,7 @@ typedef struct {
     uint8_t lead;                        /* voice leading */
     uint8_t hold;                        /* el acorde sigue al soltar (por defecto, sí) */
     uint8_t arp_free;                    /* ciclo del arpegio: 0 en el compás (grupos de 4), 1 libre */
+    uint8_t meter;                       /* tipo de compás (PRESET): 4/4, 3/4, 6/8, 5/4, 7/8 */
     uint8_t arp_mute_vol;                /* el volumen que tenía el arpegio antes de silenciarlo con SEL */
     uint8_t arp_mode;                    /* 0 sube, 1 baja, 2 sube-baja, 3 azar */
     uint8_t arp_div;                     /* 0 corcheas, 1 tresillos, 2 semicorcheas */
@@ -83,6 +84,22 @@ static const char *const BK_LABEL[NBK] = {"m/M", "7", "M7", "s2", "s4", "9", "6"
 static const unsigned BK_MOD[8] = {BL_MOD_FLIP, BL_MOD_7, BL_MOD_MAJ7, BL_MOD_SUS2,
                                    BL_MOD_SUS4, BL_MOD_9, BL_MOD_6, BL_MOD_DIMAUG};
 static const uint8_t WK[16] = PLAT_WHITE_KEYS, BK[11] = PLAT_BLACK_KEYS;
+/* los compases: corcheas por compás y por pulso, y cómo se agrupa el arpegio en corcheas y en semicorcheas */
+typedef struct {
+    const char *name;
+    uint8_t bar8, beat8;
+    uint8_t ng8, g8[3];
+    uint8_t ng16, g16[5];
+} meter_t;
+#define NMETER 5
+static const meter_t METER[NMETER] = {
+    {"4/4", 8, 2, 2, {4, 4}, 4, {4, 4, 4, 4}},
+    {"3/4", 6, 2, 2, {3, 3}, 3, {4, 4, 4}},
+    {"6/8", 6, 3, 2, {3, 3}, 4, {3, 3, 3, 3}},
+    {"5/4", 10, 2, 3, {4, 3, 3}, 5, {4, 4, 4, 4, 4}},
+    {"7/8", 7, 1, 2, {4, 3}, 4, {4, 4, 3, 3}},
+};
+#define MT (&METER[set.meter % NMETER])
 static const char *const ARP_MODE_NAME[4] = {"SUBE", "BAJA", "S-B", "AZAR"};
 
 /* las páginas de los knobs: cada botón recorre las suyas; HOME vuelve a la principal */
@@ -356,9 +373,23 @@ static void arp_voice(int note, int low, float step, int len)
 static int arp_note_bar(uint32_t idx)
 {
     static const uint8_t SB4[4] = {0, 1, 2, 1}, SB3[3] = {0, 2, 1};
-    int n = achord.n, G = set.arp_div == 1 ? 3 : 4, pos = (int)(idx % (uint32_t)G), k;
-    int oct = (int)((idx / (uint32_t)G) % set.arp_oct);
+    int n = achord.n, G, pos, k, oct;
     if (n == 0) return -1;
+    if (set.arp_div == 1) {                  /* tresillos: de 3 en 3 */
+        G = 3;
+        pos = (int)(idx % 3u);
+        oct = (int)((idx / 3u) % set.arp_oct);
+    } else {                                 /* corcheas o semicorcheas: los grupos del compás */
+        const meter_t *m = MT;
+        int sixteenths = set.arp_div == 2, ng = sixteenths ? m->ng16 : m->ng8, g = 0;
+        const uint8_t *gs = sixteenths ? m->g16 : m->g8;
+        uint32_t bar = (uint32_t)(sixteenths ? 2 * m->bar8 : m->bar8);
+        int s_in = (int)(idx % bar);
+        while (g < ng - 1 && s_in >= gs[g]) { s_in -= gs[g]; g++; }
+        G = gs[g];
+        pos = s_in;
+        oct = (int)(((idx / bar) * (uint32_t)ng + (uint32_t)g) % set.arp_oct);
+    }
     switch (set.arp_mode) {
     case 1: k = G - 1 - pos; break;                               /* baja */
     case 2: k = G == 4 ? SB4[pos] : SB3[pos]; break;              /* sube y baja */
@@ -690,6 +721,7 @@ static void settings_defaults(void)
     set.hold = 1;
     set.arp_mute_vol = VOL_UNITY;
     set.arp_free = 0;
+    set.meter = 0;
     set.arp_mode = 0;
     set.arp_div = 0;
     set.arp_oct = 1;
@@ -766,7 +798,7 @@ static void settings_load(void)
     if (plat_store_load(OBJ_SETTINGS, &set, sizeof set) != (int)sizeof set || set.magic != SET_MAGIC
         || set.key > 11u || set.mode >= BL_MODE_COUNT || set.octave < -2 || set.octave > 2
         || set.bright > 20u || set.lead > 1u || set.hold > 1u
-        || set.arp_mute_vol > VOL_MAX || set.arp_free > 1u || set.arp_mode > 3u || set.arp_div > 2u || set.arp_oct < 1u || set.arp_oct > 3u
+        || set.arp_mute_vol > VOL_MAX || set.arp_free > 1u || set.meter >= NMETER || set.arp_mode > 3u || set.arp_div > 2u || set.arp_oct < 1u || set.arp_oct > 3u
         || set.arp_len < 1u || set.arp_len > 9u || set.tempo < 40u || set.tempo > 220u
         || set.dly_mix > 10u || set.dly_div > 5u || set.dly_fb > 9u || set.rev_mix > 10u
         || set.dly_on > 1u || set.rev_on > 1u || set.rev_size > 9u || set.rev_tone > 9u
@@ -1077,18 +1109,18 @@ static void seq_play(int on)
 
 static void seq_finish(void)
 {
-    int len = ((int)(st.rec_acc + 4.0f) / 8) * 8;   /* al compás más cercano */
+    int bar = MT->bar8, len = ((int)(st.rec_acc + (float)bar / 2.0f) / bar) * bar;   /* al compás más cercano */
     st.rec = 0;
     if (!REC_LOOP.n) { app_say("REC", "NADA"); return; }
-    if (len < 8) len = 8;
-    while (len <= REC_LOOP.ev[REC_LOOP.n - 1].step) len += 8;
-    if (len > LOOP_STEPS) len = LOOP_STEPS;
+    if (len < bar) len = bar;
+    while (len <= REC_LOOP.ev[REC_LOOP.n - 1].step) len += bar;
+    if (len > LOOP_STEPS) len = LOOP_STEPS / bar * bar;
     REC_LOOP.len = (uint8_t)len;
     set_dirty = 1;
     {
         char t[12];
-        int_text(len / 8, t);
-        text_cat(t, len == 8 ? " COMPAS" : " COMPASES");
+        int_text(len / bar, t);
+        text_cat(t, len == bar ? " COMPAS" : " COMPASES");
         app_say("IDEA", t);
     }
     seq_play(1);
@@ -1372,6 +1404,9 @@ static void input(void)
             set.tempo = (uint8_t)clamp((int32_t)set.tempo + e, 40, 220);
             int_text(set.tempo, t);
             set_changed("TEMPO", t);
+        } else if (st.page == PG_GLO && k == EN_ALGO) {   /* GLOBAL: encadenar acordes, en ALGORITHM */
+            set.lead = e > 0;
+            set_changed("ENCADENAR", set.lead ? "SI" : "NO");
         } else if (st.page == PG_GLO && k >= EN_K1) {   /* GLOBAL: tonalidad, modo, octava, brillo */
             if (k == EN_K1) {
                 set.key = (uint8_t)(((int)set.key + e % 12 + 12) % 12);
@@ -1397,9 +1432,9 @@ static void input(void)
             *vol = (uint8_t)clamp((int32_t)*vol + e, 0, VOL_MAX);
             int_text(*vol * 100 / VOL_MAX, t); text_cat(t, "%");
             set_changed(NAME[k - EN_K1], t);
-        } else if (k == EN_PRESET) {
-            set.lead ^= 1u;
-            set_changed("ENCADENAR", set.lead ? "SI" : "NO");
+        } else if (k == EN_PRESET) {         /* PRESET: el tipo de compás */
+            set.meter = (uint8_t)clamp((int32_t)set.meter + e, 0, NMETER - 1);
+            set_changed("COMPAS", MT->name);
         }
     }
 
@@ -1480,12 +1515,14 @@ static void draw(void)
                 cv_rect(x, y, 9, 9, fill);
             }
         }
-        if (ARP_ON || set.bp_on) {           /* el arpegiador, el bajo pulsado y el tempo, a la derecha */
-            char b[24] = "", n[8];
+        {                                    /* el arpegiador, el bajo pulsado, el tempo y el compás, a la derecha */
+            char b[28] = "", n[8];
             if (ARP_ON) text_cat(b, "ARP ");
             if (set.bp_on) text_cat(b, "BAJO ");
             int_text(set.tempo, n);
             text_cat(b, n);
+            text_cat(b, " ");
+            text_cat(b, MT->name);
             cv_text(234 - text_w(&FONT_XS, b), 44, &FONT_XS, b, C_HI);
         }
         if (st.rec || st.playing) {          /* REC / PLAY y compás.pulso */
@@ -1495,10 +1532,10 @@ static void draw(void)
             else {
                 char n[8];
                 text_cat(b, st.rec == 2 ? "REC " : "PLAY ");
-                int_text((int32_t)(p / 8u + 1u), n); text_cat(b, n);
+                int_text((int32_t)(p / MT->bar8 + 1u), n); text_cat(b, n);
                 text_cat(b, ".");
-                int_text((int32_t)(p % 8u / 2u + 1u), n); text_cat(b, n);
-                if (st.playing) { text_cat(b, "/"); int_text(PLAY_LOOP.len / 8, n); text_cat(b, n); }
+                int_text((int32_t)(p % MT->bar8 / MT->beat8 + 1u), n); text_cat(b, n);
+                if (st.playing) { text_cat(b, "/"); int_text(PLAY_LOOP.len / MT->bar8, n); text_cat(b, n); }
             }
             cv_text(6, 4, &FONT_XS, b, st.rec ? C_WHITE : C_HI);
         }
@@ -1571,6 +1608,7 @@ static void draw(void)
             text_cat(v[2], ARP_DIV_NAME[set.arp_div]);
             int_text(set.arp_len * 10, v[3]); text_cat(v[3], "%");
         } else if (pg == PG_GLO) {
+            text_cat(head, set.lead ? "  ENCADENAR SI" : "  ENCADENAR NO");
             lbl[0] = "TONO"; lbl[1] = "MODO"; lbl[2] = "OCTAVA"; lbl[3] = "BRILLO";
             text_cat(v[0], bl_note_name(set.key, set.key));
             text_cat(v[1], MODE_NAME[set.mode]);
@@ -1675,6 +1713,7 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "arp")) *got = ARP_ON;
     else if (!strcmp(what, "vol_arp")) *got = set.vol_arp;
     else if (!strcmp(what, "arp_free")) *got = set.arp_free;
+    else if (!strcmp(what, "meter")) *got = set.meter;
     else if (!strcmp(what, "page")) *got = st.page;
     else if (!strcmp(what, "rec")) *got = st.rec;
     else if (!strcmp(what, "rev")) *got = set.rev_mix;

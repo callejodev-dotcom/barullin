@@ -13,7 +13,7 @@ Construido sobre [fm1-base](https://github.com/charlesvestal/fm1-base) de Charle
 | Teclas negras (mantener) | `m/M` `7` `maj7` · `sus2` `sus4` · `9` `6` `dim/aug` · `INV1` `INV2` |
 | Última tecla negra | STOP: pulsación corta para el acorde; mantenida un segundo activa o quita el HOLD (activado por defecto: el acorde sigue sonando al soltar) |
 | K1 / K2 / K3 / K4 | En la página principal (HOME): volumen del pad / del bajo / del arpegio / del rasgueo, en pasos del 5 % (una vuelta, de 0 a 100 %). Todo suena a la vez: lo que no quieras, a 0. El arpegio viene a 0 y suena en cuanto le subes el volumen |
-| PRESET | Encadenar acordes (voice leading) sí o no |
+| PRESET | Tipo de compás: 4/4, 3/4, 6/8, 5/4, 7/8. Agrupa el arpegio (4/4: 4+4; 3/4 y 6/8: 3+3; 5/4: 4+3+3; 7/8: 4+3), cierra las ideas a compases enteros y cuenta PLAY en él |
 
 ### Páginas
 
@@ -27,7 +27,7 @@ Los knobs K1–K4 son de la página en la que estás. Cada botón recorre sus p�
 | | Reverb | sí / no | sala | tono | mezcla | ancho estéreo |
 | ENV | Pad, arpegio, bajo | — | ataque (2 ms–2 s) | caída (50 ms–3 s) | sostenido (0–100 %) | release (20 ms–4 s) |
 | LFO | Pad, arpegio, bajo | sí / no | destino (filtro/brillo, volumen, afinar, paneo) | velocidad (0,1–10 Hz) | cantidad | forma (seno, triángulo, cuadrada, azar) |
-| GLO | Global | — | tonalidad | modo | octava | brillo del pad |
+| GLO | Global | — | tonalidad | modo | octava | brillo del pad (ALGORITHM: encadenar acordes sí/no) |
 | HOME | Principal | — | volumen pad | volumen bajo | volumen arpegio | volumen rasgueo |
 
 Pad, bajo, arpegio y rasgueo son capas independientes que suenan a la vez; cada una tiene su volumen en HOME. El bajo pulsado sustituye al sostenido mientras está encendido. El arpegiador y el bajo pulsado van a la misma rejilla del tempo. Efectos y LFO vienen apagados de serie.

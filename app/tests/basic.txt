@@ -554,3 +554,26 @@ wait 30
 expect arp_free 0
 tap HOME
 wait 30
+# --- compás (PRESET): 4/4 de serie; en 3/4, una idea se cierra en compases de 6 corcheas ---
+expect meter 0
+turn PRESET 1
+wait 30
+expect meter 1
+shot compas.png
+tap SEQ
+wait 30
+tap REC
+wait 30
+key 0 down
+wait 30
+key 0 up
+wait 1770
+tap REC
+wait 30
+expect loop_len 6
+expect playing 1
+tap PLAY
+wait 30
+turn PRESET -1
+wait 30
+expect meter 0
