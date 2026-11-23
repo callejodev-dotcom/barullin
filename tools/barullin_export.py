@@ -508,6 +508,8 @@ def main():
     if not a.desde:
         print("leyendo las ideas del FM-1...")
         backup_from_fm1(bk, a.port)
+    if not os.path.exists(bk):
+        raise SystemExit(f"no encuentro {bk}: sin --desde, las ideas se leen del FM-1 (conectado, con Barullín, parado)")
     data = open(bk, "rb").read()
     objs = parse_backup(data)
     if OBJ_IDEAS not in objs:
