@@ -191,6 +191,35 @@ static uint32_t clk_last = ~0u, arp_last = ~0u, bp_last = ~0u;   /* el último p
 static uint32_t arp_i, arp_rng = 0x1234567u;
 static volatile uint32_t arp_steps;      /* pasos tocados (para las pruebas) */
 
+/* Seno por tabla (512 puntos e interpolación lineal): mucho más barato que calcularlo en cada muestra, y
+ * de sobra para un seno que suena. ph en 0..1; tsin2 da el segundo armónico. */
+#define SINT_N 512
+static float sint[SINT_N + 1];
+static void sint_init(void)
+{
+    int i;
+    for (i = 0; i <= SINT_N; i++) sint[i] = fm_sinf((float)i * (6.2831853f / (float)SINT_N));
+}
+static inline float tsin(float ph)
+{
+    float x = ph * (float)SINT_N;
+    int32_t i = (int32_t)x;
+    float f = x - (float)i;
+    i &= SINT_N - 1;
+    return sint[i] + (sint[i + 1] - sint[i]) * f;
+}
+static inline float tsin2(float ph) { float p2 = ph + ph; return tsin(p2 >= 1.0f ? p2 - 1.0f : p2); }
+
+/* limitador suave (aproximación racional de tanh, sin exponenciales) */
+static inline float soft_clip(float x)
+{
+    float x2;
+    if (x > 3.0f) return 1.0f;
+    if (x < -3.0f) return -1.0f;
+    x2 = x * x;
+    return x * (27.0f + x2) / (27.0f + 9.0f * x2);
+}
+
 static float note_inc(int note) { return 440.0f * fm_exp2f((float)(note - 69) / 12.0f) / SR; }
 
 /* el acorde nuevo: las notas que ya suenan siguen sin cortarse; las demás se sueltan o se asignan */
@@ -625,14 +654,14 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
                 if (--p->left == 0) midi_ch(0x80u, p->low ? 3u : 4u, p->note, 0);
             } else p->env *= p->low ? be_rel : ae_rel;        /* y su release */
             if (p->low) {                                     /* bajo arpegiado: seno, sin efectos */
-                lowsum += (fm_sinf(p->ph * 6.2831853f) + harm_b * fm_sinf(p->ph * 12.566371f)) * p->env * p->amp;
+                lowsum += (tsin(p->ph) + (harm_b != 0.0f ? harm_b * tsin2(p->ph) : 0.0f)) * p->env * p->amp;
                 continue;
             }
             if (p->left < 0) {                                /* rasgueo: sin LFO */
-                s = (fm_sinf(p->ph * 6.2831853f) + 0.35f * fm_sinf(p->ph * 12.566371f)) * p->env * p->amp * g_strum;
+                s = (tsin(p->ph) + 0.35f * tsin2(p->ph)) * p->env * p->amp * g_strum;
                 l += s * 1.1f; r += s * 0.9f;
             } else {                                          /* arpegio: con su LFO */
-                s = (fm_sinf(p->ph * 6.2831853f) + harm_a * fm_sinf(p->ph * 12.566371f)) * p->env * p->amp * trem_now[1] * g_arp;
+                s = (tsin(p->ph) + harm_a * tsin2(p->ph)) * p->env * p->amp * trem_now[1] * g_arp;
                 l += s * 1.1f * (pan_now[1] > 0.0f ? 1.0f - pan_now[1] : 1.0f);
                 r += s * 0.9f * (pan_now[1] < 0.0f ? 1.0f + pan_now[1] : 1.0f);
             }
@@ -666,13 +695,13 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
         } else bass_env *= be_rel;
         if (bass_env > 0.0001f) {
             bass_ph += bass_inc * lo[LFO_BASS].pitch; if (bass_ph >= 1.0f) bass_ph -= 1.0f;
-            b = (fm_sinf(bass_ph * 6.2831853f) + harm_b * fm_sinf(bass_ph * 12.566371f)) * bass_env * 0.30f * trem_now[2] * g_bass;
+            b = (tsin(bass_ph) + (harm_b != 0.0f ? harm_b * tsin2(bass_ph) : 0.0f)) * bass_env * 0.30f * trem_now[2] * g_bass;
             l += b * (pan_now[2] > 0.0f ? 1.0f - pan_now[2] : 1.0f);
             r += b * (pan_now[2] < 0.0f ? 1.0f + pan_now[2] : 1.0f);
         }
         gain_now += (gain - gain_now) * 0.004f;
-        lr[2 * i] = (int32_t)(fm_tanhf(l) * gain_now);
-        lr[2 * i + 1] = (int32_t)(fm_tanhf(r) * gain_now);
+        lr[2 * i] = (int32_t)(soft_clip(l) * gain_now);
+        lr[2 * i + 1] = (int32_t)(soft_clip(r) * gain_now);
     }
     tp_beats = (float)tp_bint + tp_bfrac;    /* para el UI: dónde va el reloj */
 }
@@ -826,6 +855,7 @@ static void settings_load(void)
 
 void app_init(void)
 {
+    sint_init();
     settings_load();
     cut_update();
     st.degree = -1;
