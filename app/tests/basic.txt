@@ -715,3 +715,24 @@ wait 30
 expect sound 0
 tap HOME
 wait 30
+# --- FX por capas: ALGORITHM elige la capa (pad, bajo, arpegio, rasgueo), K4 cuánto manda al efecto ---
+tap FX
+wait 30
+expect page 13
+expect fx_bass 0
+turn ALGO 1
+wait 30
+expect fx_layer 1
+turn K4 5
+wait 30
+expect fx_bass 5
+shot fx_capas.png
+tap FX
+wait 30
+expect page 3
+expect fx_bass 0
+turn ALGO -1
+wait 30
+expect fx_layer 0
+tap HOME
+wait 30

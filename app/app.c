@@ -14,7 +14,7 @@
 #define SR 44100.0f
 
 /* ------------------------------------------------------------- ajustes --- */
-#define SET_MAGIC 0x42524C4Cu            /* "BRLL" */
+#define SET_MAGIC 0x42524C4Du            /* "BRLM" */
 #define LOOP_MAX 64                      /* cambios de acorde en una idea */
 #define LOOP_STEPS 128                   /* 16 compases de corcheas */
 typedef struct { uint8_t step; int8_t degree; uint8_t mods; uint8_t inv; } loop_ev_t;
@@ -33,6 +33,8 @@ enum lfo_dest {
     D_DLY_MIX, D_DLY_TIME, D_DL2_TIME, D_REV_MIX,
     D_DRUM_VOL, D_HAT_VOL, D_MASTER_VOL, NDEST
 };
+enum { FX_DLY, FX_DLY2, FX_REV };       /* los efectos, para sus envíos (set.fx_send) */
+static const char *const LAYER_NAME[4] = {"PAD", "BAJO", "ARP", "RASGUEO"};
 #define VOL_MAX 20                       /* pasos de volumen: una vuelta de knob (20 clics) va de 0 a 100 % */
 #define VOL_UNITY 16                     /* el nivel de antes (80 %) */
 #define ARP_ON (set.vol_arp != 0)        /* el arpegio suena en cuanto tiene volumen */
@@ -61,10 +63,10 @@ typedef struct {
     uint8_t arp_oct;                     /* 1..3 octavas */
     uint8_t arp_len;                     /* 1..9: duración de cada nota, en décimas del paso */
     uint8_t tempo;                       /* 40..220 BPM */
-    uint8_t dly_mix;                     /* 0..10: cuánto delay */
+    uint8_t fx_send[3][4];               /* 0..10: cuánto manda cada capa (pad, bajo, arpegio, rasgueo) a cada
+                                          * efecto (delay, delay libre, reverb) */
     uint8_t dly_div;                     /* 0..5: 1/16 1/8 1/8. 1/4 1/4. 1/2 */
     uint8_t dly_fb;                      /* 0..9: repeticiones */
-    uint8_t rev_mix;                     /* 0..10: cuánta reverb */
     uint8_t dly_on, rev_on;
     uint8_t rev_size;                    /* 0..9: tamaño de la sala */
     uint8_t rev_tone;                    /* 0..9: oscura .. brillante */
@@ -80,7 +82,7 @@ typedef struct {
     uint8_t dly_tone;                    /* 0..9: las repeticiones, de oscuras a brillantes */
     uint8_t d2_on;                       /* el delay libre (FX, segunda página) */
     uint16_t d2_ms;                      /* 10..750 ms */
-    uint8_t d2_fb, d2_tone, d2_mix;
+    uint8_t d2_fb, d2_tone;
     uint8_t drm_kick, drm_snare, drm_hat;   /* caja de ritmos (EDIT): el volumen de cada parte, 0 callada */
     uint8_t drm_hopen;                   /* la apertura del charles: 0 cerrado .. 10 abierto */
     uint8_t drm_mute;                    /* SEL en su página: silencio (los volúmenes se guardan) */
@@ -384,7 +386,7 @@ static inline float reverb_ch(int ch, float in)
     for (k = 0; k < NCOMB; k++) {
         uint16_t len = (uint16_t)(COMB_LEN[k] + (ch ? RSPREAD : 0));
         float *b = comb_buf[ch][k], y = b[comb_i[ch][k]];
-        comb_lp[ch][k] = y * rv_tone + comb_lp[ch][k] * (1.0f - rv_tone);   /* los agudos se apagan antes */
+        comb_lp[ch][k] += (y - comb_lp[ch][k]) * rv_tone;   /* los agudos se apagan antes */
         b[comb_i[ch][k]] = in + comb_lp[ch][k] * rv_fb;
         if (++comb_i[ch][k] >= len) comb_i[ch][k] = 0;
         out += y;
@@ -686,13 +688,26 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     float padL = 1.0f, padR = 1.0f, arpL = 0.0f, arpR = 0.0f, bassG = 0.0f, drumG = 1.0f, hatG = 1.0f, outG = 0.0f;
     float harm_a = fm_maxf(0.0f, 0.35f * (1.0f + M[D_ARP_BRIGHT])), harm_b = fm_maxf(0.0f, 0.25f * (1.0f + M[D_BASS_BRIGHT]));
     float gain = (float)master_q12 / 4096.0f * 7000000.0f;
-    float dmix = set.dly_on ? fm_maxf(0.0f, (float)set.dly_mix * 0.07f * (1.0f + M[D_DLY_MIX])) : 0.0f;
+    /* lo que manda cada capa a cada efecto (FX: ALGORITHM elige la capa, K4 cuánto) */
+    float dsend[4], d2send[4], rsend[4];
+    {
+        int k;
+        float dm = set.dly_on ? fm_maxf(0.0f, 0.07f * (1.0f + M[D_DLY_MIX])) : 0.0f;
+        float rm = set.rev_on ? fm_maxf(0.0f, 0.12f * 0.03f * (1.0f + M[D_REV_MIX])) : 0.0f;
+        float d2m = set.d2_on ? 0.07f : 0.0f;
+        for (k = 0; k < 4; k++) {
+            dsend[k] = (float)set.fx_send[FX_DLY][k] * dm;
+            d2send[k] = (float)set.fx_send[FX_DLY2][k] * d2m;
+            rsend[k] = (float)set.fx_send[FX_REV][k] * rm;
+        }
+    }
     float dfb = set.dly_on ? (float)set.dly_fb * 0.09f : 0.0f;
-    float rmix = set.rev_on ? fm_maxf(0.0f, (float)set.rev_mix * 0.12f * (1.0f + M[D_REV_MIX])) : 0.0f;
     float dtarget = dly_target() * (1.0f + 0.04f * M[D_DLY_TIME]);   /* el tiempo, movido: efecto de cinta */
-    float d2mix = set.d2_on ? (float)set.d2_mix * 0.07f : 0.0f, d2fb = set.d2_on ? (float)set.d2_fb * 0.09f : 0.0f;
+    float d2fb = set.d2_on ? (float)set.d2_fb * 0.09f : 0.0f;
     float d2target = fm_minf(SR * (float)set.d2_ms / 1000.0f * (1.0f + 0.04f * M[D_DL2_TIME]), (float)(DLY_MAX - 2));
     float d2tone = 0.15f + (float)set.d2_tone * 0.094f;
+    int dstill = D[D_DLY_TIME] <= 0.0f && fm_fabsf(dtarget - dly_cur) < 0.5f;
+    int32_t dint = (int32_t)(dly_cur + 0.5f);
     int d2still = D[D_DL2_TIME] <= 0.0f && fm_fabsf(d2target - dl2_cur) < 0.5f;
     int32_t d2int = (int32_t)(dl2_cur + 0.5f);
     float dglide = (D[D_DLY_TIME] > 0.0f || D[D_DL2_TIME] > 0.0f) ? 0.002f : 0.0002f;
@@ -773,7 +788,7 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
     }
     { uint32_t pkt; int port; while (plat_midi_in(&pkt, &port)) {} }   /* (la entrada MIDI llegará más adelante) */
     for (i = 0; i < n; i++) {
-        float l = 0.0f, r = 0.0f, b, s, lowsum = 0.0f;
+        float l = 0.0f, r = 0.0f, s, lowsum = 0.0f, al = 0.0f, ar = 0.0f, sl = 0.0f, sr = 0.0f, bm, din, d2in, rin;
         {   /* el reloj maestro avanza; cada uno toca al cruzar su línea de la rejilla */
             static const uint8_t ARP_PB[3] = {2, 3, 4}, BP_PB[4] = {1, 2, 3, 4};
             uint32_t idx;
@@ -902,6 +917,7 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             hatG = trem_now[SM_HAT];
             outG = trem_now[SM_MASTER];
         }
+        /* cada capa por su lado (cada una manda lo suyo a los efectos): pad, arpegio, rasgueo, bajo */
         l = lp2[0] * padL;
         r = lp2[1] * padR;
         /* rasgueos: seno con algo de segundo armónico, que se apaga solo */
@@ -917,34 +933,59 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
                 else p->env = su + (p->env - su) * de;
                 if (--p->left == 0) midi_ch(0x80u, p->low ? 3u : 4u, p->note, 0);
             } else p->env *= p->low ? be_rel : ae_rel;        /* y su release */
-            if (p->low) {                                     /* bajo arpegiado: seno, sin efectos */
+            if (p->low) {                                     /* bajo arpegiado: seno */
                 lowsum += (tsin(p->ph) + (harm_b != 0.0f ? harm_b * tsin2(p->ph) : 0.0f)) * p->env * p->amp;
                 continue;
             }
             if (p->left < 0) {                                /* rasgueo: sin LFO */
                 s = (tsin(p->ph) + 0.35f * tsin2(p->ph)) * p->env * p->amp * g_strum;
-                l += s * 1.1f; r += s * 0.9f;
+                sl += s * 1.1f; sr += s * 0.9f;
             } else {                                          /* arpegio: con su LFO */
                 s = (tsin(p->ph) + harm_a * tsin2(p->ph)) * p->env * p->amp;
-                l += s * arpL;
-                r += s * arpR;
+                al += s * arpL;
+                ar += s * arpR;
             }
         }
+        /* bajo: el pulsado y el sostenido (un seno), mono */
+        bm = lowsum * bassG;
+        if (bass_gate) {
+            if (bass_stage == 0) { bass_env += be_att; if (bass_env >= 1.0f) { bass_env = 1.0f; bass_stage = 1; } }
+            else bass_env = be_sus + (bass_env - be_sus) * be_dec;
+        } else bass_env *= be_rel;
+        if (bass_env > 0.0001f) {
+            bass_ph += bass_inc * pitch_bass; if (bass_ph >= 1.0f) bass_ph -= 1.0f;
+            bm += (tsin(bass_ph) + (harm_b != 0.0f ? harm_b * tsin2(bass_ph) : 0.0f)) * bass_env * 0.30f * bassG;
+        }
+        {   /* lo que entra a cada efecto, en mono */
+            float pm = (l + r) * 0.5f, am = (al + ar) * 0.5f, sm = (sl + sr) * 0.5f;
+            din = set.dly_on ? dsend[0] * pm + dsend[1] * bm + dsend[2] * am + dsend[3] * sm : 0.0f;
+            d2in = set.d2_on ? d2send[0] * pm + d2send[1] * bm + d2send[2] * am + d2send[3] * sm : 0.0f;
+            rin = set.rev_on ? rsend[0] * pm + rsend[1] * bm + rsend[2] * am + rsend[3] * sm : 0.0f;
+        }
+        l += al + sl + bm;
+        r += ar + sr + bm;
         /* efectos: delay de rebote y reverb, sobre el pad, el rasgueo y el arpegio */
-        if (dmix > 0.0f || dfb > 0.0f) {
+        if (set.dly_on) {
             float yl, yr;
-            dly_cur += (dtarget - dly_cur) * dglide;
-            yl = dly_read(0, dly_cur);
-            yr = dly_read(1, dly_cur);
+            if (dstill) {                    /* tiempo quieto: lectura directa */
+                int32_t i0 = (int32_t)dly_w - dint;
+                if (i0 < 0) i0 += DLY_MAX;
+                yl = (float)dly_buf[0][i0] * (1.0f / 32767.0f);
+                yr = (float)dly_buf[1][i0] * (1.0f / 32767.0f);
+            } else {
+                dly_cur += (dtarget - dly_cur) * dglide;
+                yl = dly_read(0, dly_cur);
+                yr = dly_read(1, dly_cur);
+            }
             dly_lp[0] += (yr - dly_lp[0]) * dtone;   /* las repeticiones se oscurecen según el tono */
             dly_lp[1] += (yl - dly_lp[1]) * dtone;
-            dly_buf[0][dly_w] = sat16((l + r) * 0.5f + dly_lp[0] * dfb);   /* lo nuevo entra por la izquierda */
+            dly_buf[0][dly_w] = sat16(din + dly_lp[0] * dfb);   /* lo nuevo entra por la izquierda */
             dly_buf[1][dly_w] = sat16(dly_lp[1] * dfb);                      /* y rebota a la derecha */
             if (++dly_w >= DLY_MAX) dly_w = 0;
-            l += yl * dmix;
-            r += yr * dmix;
+            l += yl;
+            r += yr;
         }
-        if (d2mix > 0.0f || d2fb > 0.0f) {   /* el delay libre */
+        if (set.d2_on) {                     /* el delay libre */
             float y;
             if (d2still) {                   /* tiempo quieto: lectura directa */
                 int32_t i0 = (int32_t)dl2_w - d2int;
@@ -962,29 +1003,15 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
                 y = ((float)dl2_buf[i0] * (1.0f - fr) + (float)dl2_buf[i1] * fr) * (1.0f / 32767.0f);
             }
             dl2_lp += (y - dl2_lp) * d2tone;
-            dl2_buf[dl2_w] = sat16((l + r) * 0.5f + dl2_lp * d2fb);
+            dl2_buf[dl2_w] = sat16(d2in + dl2_lp * d2fb);
             if (++dl2_w >= DLY_MAX) dl2_w = 0;
-            l += y * d2mix;
-            r += y * d2mix;
+            l += y;
+            r += y;
         }
-        if (rmix > 0.0f) {
-            float in = (l + r) * 0.03f, rl = reverb_ch(0, in), rr = reverb_ch(1, in);
-            l += (rl * (1.0f + rwid) + rr * (1.0f - rwid)) * 0.5f * rmix;   /* ancho: de mono a todo estéreo */
-            r += (rr * (1.0f + rwid) + rl * (1.0f - rwid)) * 0.5f * rmix;
-        }
-        lowsum *= bassG;                     /* el bajo pulsado, seco, con su LFO y su volumen */
-        l += lowsum;
-        r += lowsum;
-        /* bajo: un seno, seco */
-        if (bass_gate) {
-            if (bass_stage == 0) { bass_env += be_att; if (bass_env >= 1.0f) { bass_env = 1.0f; bass_stage = 1; } }
-            else bass_env = be_sus + (bass_env - be_sus) * be_dec;
-        } else bass_env *= be_rel;
-        if (bass_env > 0.0001f) {
-            bass_ph += bass_inc * pitch_bass; if (bass_ph >= 1.0f) bass_ph -= 1.0f;
-            b = (tsin(bass_ph) + (harm_b != 0.0f ? harm_b * tsin2(bass_ph) : 0.0f)) * bass_env * 0.30f * bassG;
-            l += b;
-            r += b;
+        if (set.rev_on) {
+            float rl = reverb_ch(0, rin), rr = reverb_ch(1, rin);
+            l += (rl * (1.0f + rwid) + rr * (1.0f - rwid)) * 0.5f;   /* ancho: de mono a todo estéreo */
+            r += (rr * (1.0f + rwid) + rl * (1.0f - rwid)) * 0.5f;
         }
         gain_now += (gain - gain_now) * 0.004f;
         {
@@ -1028,7 +1055,8 @@ static struct {
     uint8_t redraw;
     uint8_t gate_hold_off;
     uint8_t q_pend;                      /* un acorde nuevo espera a su línea de la rejilla (CUADRAR) */
-    uint8_t repress;                     /* se pulsó una tecla de acorde: vuelve a sonar aunque sea el mismo */
+    uint8_t repress;
+    uint8_t fx_layer;                    /* FX: la capa cuyo envío lleva K4 (ALGORITHM la elige) */                     /* se pulsó una tecla de acorde: vuelve a sonar aunque sea el mismo */
     uint32_t q_sig, q_resets;
     int8_t q_deg;                        /* el acorde que espera (sigue esperando aunque se suelte la tecla) */
     uint8_t q_mods, q_inv;
@@ -1047,6 +1075,14 @@ static struct {
     uint32_t stop_t;                     /* la tecla STOP bajó (0: no está pulsada, o ya actuó)
                                           * corta: para el acorde; un segundo: HOLD sí / no */
 } st;
+
+static int fx_send_ok(void)
+{
+    int a, b;
+    for (a = 0; a < 3; a++) for (b = 0; b < 4; b++) if (set.fx_send[a][b] > 10u) return 0;
+    return 1;
+}
+static int page_fx(int pg) { return pg == PG_DLY ? FX_DLY : pg == PG_DLY2 ? FX_DLY2 : pg == PG_REV ? FX_REV : -1; }
 
 static void cut_update(void)
 {
@@ -1074,10 +1110,13 @@ static void settings_defaults(void)
     set.arp_oct = 1;
     set.arp_len = 5;
     set.tempo = 100;
-    set.dly_mix = 3;
+    {   /* de serie, como sonaba: pad, arpegio y rasgueo a los efectos; el bajo, seco */
+        static const uint8_t DEF[3][4] = {{3, 0, 3, 3}, {3, 0, 3, 3}, {4, 0, 4, 4}};
+        int a, b;
+        for (a = 0; a < 3; a++) for (b = 0; b < 4; b++) set.fx_send[a][b] = DEF[a][b];
+    }
     set.dly_div = 2;
     set.dly_fb = 4;
-    set.rev_mix = 4;
     set.dly_on = 0;                          /* los efectos, apagados de serie */
     set.rev_on = 0;
     set.rev_size = 6;
@@ -1104,7 +1143,6 @@ static void settings_defaults(void)
     set.d2_ms = 300;
     set.d2_fb = 3;
     set.d2_tone = 6;
-    set.d2_mix = 3;
     set.drm_kick = set.drm_snare = set.drm_hat = 0;
     set.drm_hopen = 0;
     set.drm_mute = 0;
@@ -1152,15 +1190,15 @@ static void settings_load(void)
 {
     if (plat_store_load(OBJ_SETTINGS, &set, sizeof set) != (int)sizeof set || set.magic != SET_MAGIC
         || set.key > 11u || set.mode >= BL_MODE_COUNT || set.octave < -2 || set.octave > 2
-        || set.bright > 20u || set.lead > 1u || set.sound >= NSND || set.quant > 3u || set.hold > 1u
+        || set.bright > 20u || set.lead > 1u || set.sound >= NSND || !fx_send_ok() || set.quant > 3u || set.hold > 1u
         || set.arp_mute_vol > VOL_MAX || set.arp_free > 1u || set.meter >= NMETER || set.arp_mode > 3u || set.arp_div > 2u || set.arp_oct < 1u || set.arp_oct > 3u
         || set.arp_len < 1u || set.arp_len > 9u || set.tempo < 40u || set.tempo > 220u
-        || set.dly_mix > 10u || set.dly_div > 5u || set.dly_fb > 9u || set.rev_mix > 10u
+        || set.dly_div > 5u || set.dly_fb > 9u 
         || set.dly_on > 1u || set.rev_on > 1u || set.rev_size > 9u || set.rev_tone > 9u
         || set.env_a > 9u || set.env_d > 9u || set.env_s > 10u || set.env_r > 9u
         || set.aenv_a > 9u || set.aenv_d > 9u || set.aenv_s > 10u || set.aenv_r > 9u || set.bp_on > 1u || set.bp_div > 3u || set.bp_pat > 3u || set.bp_len < 1u || set.bp_len > 9u || set.bp_oct < -1 || set.bp_oct > 1
         || set.vol_pad > VOL_MAX || set.vol_bass > VOL_MAX || set.vol_arp > VOL_MAX || set.vol_strum > VOL_MAX || set.dly_tone > 9u || set.d2_on > 1u || set.d2_ms < 10u || set.d2_ms > 750u
-        || set.d2_fb > 9u || set.d2_tone > 9u || set.d2_mix > 10u || set.drm_kick > VOL_MAX || set.drm_snare > VOL_MAX
+        || set.d2_fb > 9u || set.d2_tone > 9u || set.drm_kick > VOL_MAX || set.drm_snare > VOL_MAX
         || set.drm_hat > VOL_MAX || set.drm_hopen > 10u || set.drm_mute > 1u || set.rev_width > 10u
         || !lfos_ok()
         || set.benv_a > 9u || set.benv_d > 9u || set.benv_s > 10u || set.benv_r > 9u
@@ -1332,6 +1370,18 @@ static void set_changed(const char *a, const char *b)
 {
     set_dirty = 1;
     app_say(a, b);
+}
+
+/* K4 en las páginas de efectos: lo que manda al efecto la capa elegida con ALGORITHM */
+static void fx_send_knob(int32_t e, char *t)
+{
+    uint8_t *v = &set.fx_send[page_fx(st.page)][st.fx_layer & 3u];
+    char h[20] = "MEZCLA ";
+    *v = (uint8_t)clamp((int32_t)*v + e, 0, 10);
+    text_cat(h, LAYER_NAME[st.fx_layer & 3u]);
+    int_text(*v * 10, t);
+    text_cat(t, "%");
+    set_changed(h, t);
 }
 
 /* ------------------------------------------------------------ páginas --- */
@@ -1741,9 +1791,7 @@ static void input(void)
                 int_text(set.d2_tone + 1, t);
                 set_changed("DELAY LIBRE TONO", t);
             } else {
-                set.d2_mix = (uint8_t)clamp((int32_t)set.d2_mix + e, 0, 10);
-                int_text(set.d2_mix * 10, t); text_cat(t, "%");
-                set_changed("DELAY LIBRE MEZCLA", t);
+                fx_send_knob(e, t);
             }
         } else if (st.page == PG_DLY && k >= EN_K1) {   /* DELAY (SEL lo enciende) */
             if (k == EN_K1) {
@@ -1758,9 +1806,7 @@ static void input(void)
                 int_text(set.dly_tone + 1, t);
                 set_changed("DELAY TONO", t);
             } else {                         /* la mezcla, siempre en K4 */
-                set.dly_mix = (uint8_t)clamp((int32_t)set.dly_mix + e, 0, 10);
-                int_text(set.dly_mix * 10, t); text_cat(t, "%");
-                set_changed("DELAY MEZCLA", t);
+                fx_send_knob(e, t);
             }
         } else if (st.page == PG_REV && k >= EN_K1) {   /* REVERB (SEL la enciende) */
             if (k == EN_K1) {
@@ -1776,9 +1822,7 @@ static void input(void)
                 int_text(set.rev_width * 10, t); text_cat(t, "%");
                 set_changed("REVERB ANCHO", t);
             } else {                         /* la mezcla, siempre en K4 */
-                set.rev_mix = (uint8_t)clamp((int32_t)set.rev_mix + e, 0, 10);
-                int_text(set.rev_mix * 10, t); text_cat(t, "%");
-                set_changed("REVERB MEZCLA", t);
+                fx_send_knob(e, t);
             }
         } else if (st.page >= PG_ENV_PAD && st.page <= PG_ENV_BASS && k >= EN_K1) {   /* ENVOLVENTE: del pad, del arpegio o del bajo */
             int pg = st.page;
@@ -1877,6 +1921,15 @@ static void input(void)
                 cut_update();
                 int_text(set.bright * 5, t);
                 set_changed("BRILLO", t);
+            }
+        } else if (page_fx(st.page) >= 0 && k == EN_ALGO) {   /* FX: qué capa lleva K4 (pad, bajo, arpegio, rasgueo) */
+            st.fx_layer = (uint8_t)clamp((int32_t)st.fx_layer + e, 0, 3);
+            int_text(set.fx_send[page_fx(st.page)][st.fx_layer] * 10, t);
+            text_cat(t, "%");
+            {
+                char h[20] = "MEZCLA ";
+                text_cat(h, LAYER_NAME[st.fx_layer]);
+                app_say(h, t);
             }
         } else if (st.page == PG_MAIN && k == EN_ALGO) {   /* HOME: cuadrar los cambios de acorde */
             set.quant = (uint8_t)clamp((int32_t)set.quant + e, 0, 3);
@@ -2088,19 +2141,19 @@ static void draw(void)
             text_cat(v[0], DLY_DIV_NAME[set.dly_div]);
             int_text(set.dly_fb * 10, v[1]); text_cat(v[1], "%");
             int_text(set.dly_tone + 1, v[2]);
-            int_text(set.dly_mix * 10, v[3]); text_cat(v[3], "%");
+            int_text(set.fx_send[page_fx(pg)][st.fx_layer & 3u] * 10, v[3]); text_cat(v[3], "%");
         } else if (pg == PG_DLY2) {
             lbl[0] = "TIEMPO"; lbl[1] = "REPETIR"; lbl[2] = "TONO"; lbl[3] = "MEZCLA";
             int_text(set.d2_ms, v[0]); text_cat(v[0], "ms");
             int_text(set.d2_fb * 10, v[1]); text_cat(v[1], "%");
             int_text(set.d2_tone + 1, v[2]);
-            int_text(set.d2_mix * 10, v[3]); text_cat(v[3], "%");
+            int_text(set.fx_send[page_fx(pg)][st.fx_layer & 3u] * 10, v[3]); text_cat(v[3], "%");
         } else if (pg == PG_REV) {
             lbl[0] = "SALA"; lbl[1] = "TONO"; lbl[2] = "ANCHO"; lbl[3] = "MEZCLA";
             int_text(set.rev_size + 1, v[0]);
             int_text(set.rev_tone + 1, v[1]);
             int_text(set.rev_width * 10, v[2]); text_cat(v[2], "%");
-            int_text(set.rev_mix * 10, v[3]); text_cat(v[3], "%");
+            int_text(set.fx_send[page_fx(pg)][st.fx_layer & 3u] * 10, v[3]); text_cat(v[3], "%");
         } else if (pg >= PG_ENV_PAD && pg <= PG_ENV_BASS) {
             int ea = pg == PG_ENV_PAD ? set.env_a : pg == PG_ENV_ARP ? set.aenv_a : set.benv_a;
             int ed = pg == PG_ENV_PAD ? set.env_d : pg == PG_ENV_ARP ? set.aenv_d : set.benv_d;
@@ -2121,7 +2174,21 @@ static void draw(void)
             int_text(L->depth * 10, v[2]); text_cat(v[2], "%");
             text_cat(v[3], LFO_SHAPE_NAME[L->shape]);
         }
-        cv_text(4, 50, &FONT_XS, head, page_active(pg) ? C_HI : C_GRAY);
+        {
+            int32_t x = cv_text(4, 50, &FONT_XS, head, page_active(pg) ? C_HI : C_GRAY);
+            if (page_fx(pg) >= 0) {          /* los envíos de las cuatro capas; la de K4, resaltada */
+                static const char *const AB[4] = {"P", "B", "A", "R"};
+                int f = page_fx(pg), q;
+                lbl[3] = st.fx_layer == 0 ? "MEZ PAD" : st.fx_layer == 1 ? "MEZ BAJO" : st.fx_layer == 2 ? "MEZ ARP" : "MEZ RASG";
+                x += 10;
+                for (q = 0; q < 4; q++) {
+                    char tt[8] = "";
+                    text_cat(tt, AB[q]);
+                    int_text(set.fx_send[f][q], tt + 1);
+                    x = cv_text(x, 50, &FONT_XS, tt, q == st.fx_layer ? C_HI : C_GRAY) + 6;
+                }
+            }
+        }
         for (i = 0; i < 4; i++) {
             cv_text(4 + i * 60, 68, &FONT_XS, lbl[i], C_AMB);
             cv_text(4 + i * 60, 81, &FONT_XS, v[i], C_WHITE);
@@ -2198,8 +2265,11 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "d2_on")) *got = set.d2_on;
     else if (!strcmp(what, "page")) *got = st.page;
     else if (!strcmp(what, "rec")) *got = st.rec;
-    else if (!strcmp(what, "rev")) *got = set.rev_mix;
-    else if (!strcmp(what, "dly")) *got = set.dly_mix;
+    else if (!strcmp(what, "rev")) *got = set.fx_send[FX_REV][0];
+    else if (!strcmp(what, "dly")) *got = set.fx_send[FX_DLY][0];
+    else if (!strcmp(what, "dly_bass")) *got = set.fx_send[FX_DLY][1];
+    else if (!strcmp(what, "fx_layer")) *got = st.fx_layer;
+    else if (!strcmp(what, "fx_bass")) *got = page_fx(st.page) >= 0 ? set.fx_send[page_fx(st.page)][1] : -1;
     else if (!strcmp(what, "dly_on")) *got = set.dly_on;
     else if (!strcmp(what, "rev_on")) *got = set.rev_on;
     else if (!strcmp(what, "rev_size")) *got = set.rev_size;
