@@ -2517,7 +2517,7 @@ static void draw(void)
         if (bw) {
             int16_t c = st.batt_shown, pc = c % 1000;
             uint16_t col = c >= 1000 || pc >= 30 ? RGB565(120, 235, 140) : pc >= 15 ? C_AMB : RGB565(255, 70, 60);
-            cv_text(238 - bw, 2, &FONT_XS, bt, col);     /* (pegada a la esquina, arriba) */
+            cv_text(238 - bw, 8, &FONT_XS, bt, col);    /* (en la esquina, centrada en la cabecera) */
         }
     }
     cv_rect(0, 29, 240, 1, C_LINE);
