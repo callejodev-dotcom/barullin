@@ -424,22 +424,22 @@ static inline float drum_sample(float g_hat)
         dk_env *= 0.99984f;                  /* ~140 ms */
         dk_pitch *= 0.9988f;                 /* el golpe: el tono cae rápido */
     }
-    if (ds_env > 0.003f) {                   /* caja tipo 909: parche (dos tonos que caen un poco) + bordonera */
+    if (ds_env > 0.003f) {                   /* caja tipo 909, grave: parche (dos tonos que caen un poco) + bordonera */
         float bend = 1.0f + 0.35f * ds_bend, body, wires;
-        ds_ph += 185.0f * bend / SR;
+        ds_ph += 150.0f * bend / SR;
         if (ds_ph >= 1.0f) ds_ph -= 1.0f;
-        ds_ph2 += 330.0f * bend / SR;
+        ds_ph2 += 245.0f * bend / SR;
         if (ds_ph2 >= 1.0f) ds_ph2 -= 1.0f;
-        body = (tsin(ds_ph) * 0.62f + tsin(ds_ph2) * 0.38f) * ds_tone;
-        /* la bordonera: ruido sin graves (paso alto ~900 Hz) ni siseo (dos pasos bajos ~5 kHz) */
-        sn_hp = 0.886f * (sn_hp + n - sn_x1);
+        body = (tsin(ds_ph) * 0.70f + tsin(ds_ph2) * 0.30f) * ds_tone;
+        /* la bordonera: ruido sin graves (paso alto ~500 Hz) ni siseo (dos pasos bajos ~3,5 kHz) */
+        sn_hp = 0.933f * (sn_hp + n - sn_x1);
         sn_x1 = n;
-        sn_lp += (sn_hp - sn_lp) * 0.50f;
-        sn_lp2 += (sn_lp - sn_lp2) * 0.50f;
+        sn_lp += (sn_hp - sn_lp) * 0.40f;
+        sn_lp2 += (sn_lp - sn_lp2) * 0.40f;
         wires = sn_lp2 * ds_env * ds_env;    /* al cuadrado: pega fuerte y se corta seca, sin cola */
-        out += (body * 0.95f + wires * 1.10f + sn_lp * ds_click * 0.30f) * ds_amp * 0.7f;
+        out += (body * 1.15f + wires * 1.00f + sn_lp * ds_click * 0.30f) * ds_amp * 0.7f;
         ds_env *= 0.99955f;                  /* la bordonera: se apaga del todo en ~200 ms */
-        ds_tone *= 0.99930f;                 /* el parche: ~30 ms */
+        ds_tone *= 0.99950f;                 /* el parche: ~45 ms, con cuerpo */
         ds_bend *= 0.9980f;                  /* la afinación cae en ~10 ms */
         ds_click *= 0.990f;                  /* el golpe: ~2 ms */
     }
