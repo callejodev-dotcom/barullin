@@ -594,3 +594,24 @@ wait 30
 expect dly_ms -1
 tap HOME
 wait 30
+# --- caja de ritmos (EDIT): cada knob, el volumen de una parte; suena con el acorde ---
+tap EDIT
+wait 30
+expect page 12
+turn K1 16
+turn K2 16
+wait 30
+expect drm_kick 16
+key 0 down
+wait 30
+key 0 up
+wait 1500
+expect drum_hits 1
+shot ritmo.png
+tap SEL
+wait 30
+turn K1 -16
+turn K2 -16
+tap SEL
+tap HOME
+wait 30

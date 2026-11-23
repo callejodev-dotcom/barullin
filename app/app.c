@@ -14,7 +14,7 @@
 #define SR 44100.0f
 
 /* ------------------------------------------------------------- ajustes --- */
-#define SET_MAGIC 0x42524C46u            /* "BRLF" */
+#define SET_MAGIC 0x42524C47u            /* "BRLG" */
 #define LOOP_MAX 64                      /* cambios de acorde en una idea */
 #define LOOP_STEPS 128                   /* 16 compases de corcheas */
 typedef struct { uint8_t step; int8_t degree; uint8_t mods; uint8_t inv; } loop_ev_t;
@@ -29,6 +29,7 @@ enum { LFO_PAD, LFO_ARP, LFO_BASS };
 #define VOL_MAX 20                       /* pasos de volumen: una vuelta de knob (20 clics) va de 0 a 100 % */
 #define VOL_UNITY 16                     /* el nivel de antes (80 %) */
 #define ARP_ON (set.vol_arp != 0)        /* el arpegio suena en cuanto tiene volumen */
+#define DRUM_ON (!set.drm_mute && (set.drm_kick || set.drm_snare || set.drm_hatq || set.drm_hat8))
 #define NBANK 8                          /* bancos de ideas (SEQ pasa de uno a otro) */
 typedef struct {
     uint8_t len;                         /* corcheas (0: vacío), compases enteros */
@@ -70,6 +71,8 @@ typedef struct {
     uint8_t dly_tone;                    /* 0..9: las repeticiones, de oscuras a brillantes */
     uint8_t dly_free;                    /* el tiempo del delay: 0 a tempo, 1 libre en ms */
     uint16_t dly_ms;                     /* libre: 10..750 ms */
+    uint8_t drm_kick, drm_snare, drm_hatq, drm_hat8;   /* caja de ritmos (EDIT): el volumen de cada parte, 0 callada */
+    uint8_t drm_mute;                    /* SEL en su página: silencio (los volúmenes se guardan) */
     uint8_t rev_width;                   /* 0..10: ancho estéreo de la reverb */
     lfo_t lfo[3];                        /* un LFO por sonido: pad, arpegio, bajo */
     uint8_t cur_bank;                    /* el banco elegido: REC graba en él, PLAY lo toca */
@@ -92,22 +95,23 @@ typedef struct {
     uint8_t bar8, beat8;
     uint8_t ng8, g8[3];
     uint8_t ng16, g16[5];
+    uint16_t beats;                      /* la batería: las corcheas del compás donde empieza un pulso (bit s) */
 } meter_t;
 #define NMETER 5
 static const meter_t METER[NMETER] = {
-    {"4/4", 8, 2, 2, {4, 4}, 4, {4, 4, 4, 4}},
-    {"3/4", 6, 2, 2, {3, 3}, 3, {4, 4, 4}},
-    {"6/8", 6, 3, 2, {3, 3}, 4, {3, 3, 3, 3}},
-    {"5/4", 10, 2, 3, {4, 3, 3}, 5, {4, 4, 4, 4, 4}},
-    {"7/8", 7, 1, 2, {4, 3}, 4, {4, 4, 3, 3}},
+    {"4/4", 8, 2, 2, {4, 4}, 4, {4, 4, 4, 4}, 0x55},           /* pulsos en 0 2 4 6 */
+    {"3/4", 6, 2, 2, {3, 3}, 3, {4, 4, 4}, 0x15},              /* 0 2 4 */
+    {"6/8", 6, 3, 2, {3, 3}, 4, {3, 3, 3, 3}, 0x09},           /* 0 3 */
+    {"5/4", 10, 2, 3, {4, 3, 3}, 5, {4, 4, 4, 4, 4}, 0x155},   /* 0 2 4 6 8 */
+    {"7/8", 7, 1, 2, {4, 3}, 4, {4, 4, 3, 3}, 0x15},           /* 0 2 4 (2+2+3) */
 };
 #define MT (&METER[set.meter % NMETER])
 static const char *const ARP_MODE_NAME[4] = {"SUBE", "BAJA", "S-B", "AZAR"};
 
 /* las páginas de los knobs: cada botón recorre las suyas; HOME vuelve a la principal */
-enum { PG_MAIN, PG_ARP, PG_DLY, PG_REV, PG_ENV_PAD, PG_ENV_ARP, PG_ENV_BASS, PG_BP, PG_LFO_PAD, PG_LFO_ARP, PG_LFO_BASS, PG_GLO, NPG };
+enum { PG_MAIN, PG_ARP, PG_DLY, PG_REV, PG_ENV_PAD, PG_ENV_ARP, PG_ENV_BASS, PG_BP, PG_LFO_PAD, PG_LFO_ARP, PG_LFO_BASS, PG_GLO, PG_DRUM, NPG };
 static const char *const PAGE_NAME[NPG] = {"", "ARPEGIADOR", "DELAY", "REVERB", "ENV PAD", "ENV ARP", "ENV BAJO",
-                                           "BAJO PULSADO", "LFO PAD", "LFO ARP", "LFO BAJO", "GLOBAL"};
+                                           "BAJO PULSADO", "LFO PAD", "LFO ARP", "LFO BAJO", "GLOBAL", "RITMO"};
 static const char *const ARP_DIV_NAME[3] = {"1/8", "1/8T", "1/16"};
 static const char *const BP_DIV_NAME[4] = {"1/4", "1/8", "1/8T", "1/16"};
 static const char *const BP_PAT_NAME[4] = {"NOTA", "QUINTA", "OCTAVA", "ACORDE"};
@@ -352,6 +356,69 @@ static inline float reverb_ch(int ch, float in)
         b[ap_i[ch][k]] = out + bo * 0.5f;
         out = bo - out;
         if (++ap_i[ch][k] >= len) ap_i[ch][k] = 0;
+    }
+    return out;
+}
+
+/* -------------------------------------------------------- caja de ritmos --- */
+/* Bombo: seno que cae de tono; caja: ruido y un tono; charles: ruido brillante y corto. Seca, al centro. */
+static float dk_env, dk_pitch, dk_ph, ds_env, ds_tone, ds_ph, dh_env, dh_prev;
+static float dk_amp, ds_amp, dh_amp;
+static uint32_t d_rng = 0x51ED27u, drum_last = ~0u;
+static volatile uint32_t drum_hits;      /* golpes tocados (para las pruebas) */
+
+static void midi_ch(uint32_t st_, uint32_t ch, uint32_t d1, uint32_t d2);
+static void drum_hit(int which, float amp)
+{
+    static const uint8_t NOTE[3] = {36, 38, 42};
+    if (amp <= 0.0f) return;
+    if (which == 0) { dk_env = 1.0f; dk_pitch = 1.0f; dk_ph = 0.0f; dk_amp = amp; }
+    else if (which == 1) { ds_env = 1.0f; ds_tone = 1.0f; ds_amp = amp; }
+    else { dh_env = 1.0f; dh_amp = amp; }
+    midi_ch(0x90u, 10, NOTE[which], (uint32_t)clamp((int32_t)(amp * 127.0f), 1, 127));
+    midi_ch(0x80u, 10, NOTE[which], 0);
+    drum_hits++;
+}
+
+/* la corchea s del compás: qué suena */
+static void drum_step(uint32_t s)
+{
+    const meter_t *m = MT;
+    int beat = (int)(m->beats >> s & 1u), nbeat = 0;
+    uint32_t k;
+    float hat = 0.0f;
+    for (k = 0; k < s; k++) nbeat += (int)(m->beats >> k & 1u);   /* qué pulso es (0, 1, 2...) */
+    if (beat) drum_hit(0, (float)set.drm_kick / VOL_UNITY);
+    if (beat && (nbeat & 1)) drum_hit(1, (float)set.drm_snare / VOL_UNITY);   /* en el 2 y el 4 */
+    if (beat) hat = (float)set.drm_hatq / VOL_UNITY;
+    if ((float)set.drm_hat8 / VOL_UNITY > hat) hat = (float)set.drm_hat8 / VOL_UNITY;
+    drum_hit(2, hat);
+}
+
+static inline float drum_sample(void)
+{
+    float out = 0.0f, n;
+    d_rng = d_rng * 1664525u + 1013904223u;
+    n = (float)(int32_t)d_rng * (1.0f / 2147483648.0f);
+    if (dk_env > 0.0005f) {
+        dk_ph += (45.0f + 110.0f * dk_pitch) / SR;
+        if (dk_ph >= 1.0f) dk_ph -= 1.0f;
+        out += tsin(dk_ph) * dk_env * dk_amp * 0.55f;
+        dk_env *= 0.99984f;                  /* ~140 ms */
+        dk_pitch *= 0.9988f;                 /* el golpe: el tono cae rápido */
+    }
+    if (ds_env > 0.0005f) {
+        ds_ph += 185.0f / SR;
+        if (ds_ph >= 1.0f) ds_ph -= 1.0f;
+        out += (n * 0.5f * ds_env + tsin(ds_ph) * 0.35f * ds_tone) * ds_amp * 0.6f;
+        ds_env *= 0.99940f;                  /* ~40 ms */
+        ds_tone *= 0.99900f;
+    }
+    if (dh_env > 0.0005f) {
+        float hp = n - dh_prev;              /* ruido brillante */
+        dh_prev = n;
+        out += hp * dh_env * dh_amp * 0.16f;
+        dh_env *= 0.9965f;                   /* ~6 ms: cerrado */
     }
     return out;
 }
@@ -602,12 +669,12 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             tp_bfrac = 0.0f;
             pf_bint = 0;
             pf_bfrac = 0.0f;
-            clk_last = arp_last = bp_last = ~0u;
+            clk_last = arp_last = bp_last = drum_last = ~0u;
             tp_resets++;
         } else if (chord_new && achord.gate && tp_gate_was && !tp_locked) {
             pf_bint = 0;                     /* en directo, acorde nuevo: el arpegio y el bajo, en el acto */
             pf_bfrac = 0.0f;
-            arp_last = bp_last = ~0u;
+            arp_last = bp_last = drum_last = ~0u;
         } else if (chord_new && achord.gate && tp_gate_was) {
             /* con la rejilla del compás: si el acorde llega un pelín tarde (hasta 60 ms tras un paso), ese paso
              * se repite con el acorde nuevo */
@@ -631,7 +698,7 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             arp_age++;
             bp_age++;
             idx = tp_bint * 24u + (uint32_t)(tp_bfrac * 24.0f);
-            if (idx != clk_last) { clk_last = idx; if (ARP_ON || set.bp_on) midi_rt(0xF8u); }
+            if (idx != clk_last) { clk_last = idx; if (ARP_ON || set.bp_on || DRUM_ON) midi_rt(0xF8u); }
             if (ARP_ON) {
                 uint32_t pb = ARP_PB[set.arp_div % 3u];
                 idx = pf_bint * pb + (uint32_t)(pf_bfrac * (float)pb);
@@ -641,6 +708,10 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
                 uint32_t pb = BP_PB[set.bp_div % 4u];
                 idx = pf_bint * pb + (uint32_t)(pf_bfrac * (float)pb);
                 if (idx != bp_last) { bp_last = idx; bp_age = 0; if (achord.gate) bp_fire(bp_step_len(), idx); }
+            }
+            if (DRUM_ON) {                   /* la batería, en corcheas, con la misma rejilla */
+                idx = pf_bint * 2u + (uint32_t)(pf_bfrac * 2.0f);
+                if (idx != drum_last) { drum_last = idx; if (achord.gate) drum_step(idx % MT->bar8); }
             }
         }
         for (j = 0; j < NPAD; j++) {
@@ -727,6 +798,11 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             r += b * (pan_now[2] < 0.0f ? 1.0f + pan_now[2] : 1.0f);
         }
         gain_now += (gain - gain_now) * 0.004f;
+        {   /* la batería, seca y al centro */
+            float d = drum_sample();
+            l += d;
+            r += d;
+        }
         lr[2 * i] = (int32_t)(soft_clip(l) * gain_now);
         lr[2 * i + 1] = (int32_t)(soft_clip(r) * gain_now);
     }
@@ -759,7 +835,7 @@ static struct {
     uint32_t keys, btn;
     uint8_t redraw;
     uint8_t gate_hold_off;
-    uint8_t mem_arp, mem_fx, mem_env, mem_lfo, mem_glo;   /* la última página de cada botón: se vuelve a ella */
+    uint8_t mem_arp, mem_fx, mem_env, mem_lfo, mem_glo, mem_drum;   /* la última página de cada botón: se vuelve a ella */
     uint32_t leds;                       /* los botones iluminados (para las pruebas) */
     uint8_t page;                        /* de quién son K1..K4: 0 acorde, 1 arpegiador, 2 delay, 3 reverb,
                                           * 4..6 envolventes (pad, arpegio, bajo), 7 bajo pulsado */
@@ -825,6 +901,8 @@ static void settings_defaults(void)
     set.dly_tone = 7;
     set.dly_free = 0;
     set.dly_ms = 300;
+    set.drm_kick = set.drm_snare = set.drm_hatq = set.drm_hat8 = 0;
+    set.drm_mute = 0;
     set.rev_width = 10;
     {
         int k;
@@ -876,7 +954,8 @@ static void settings_load(void)
         || set.dly_on > 1u || set.rev_on > 1u || set.rev_size > 9u || set.rev_tone > 9u
         || set.env_a > 9u || set.env_d > 9u || set.env_s > 10u || set.env_r > 9u
         || set.aenv_a > 9u || set.aenv_d > 9u || set.aenv_s > 10u || set.aenv_r > 9u || set.bp_on > 1u || set.bp_div > 3u || set.bp_pat > 3u || set.bp_len < 1u || set.bp_len > 9u || set.bp_oct < -1 || set.bp_oct > 1
-        || set.vol_pad > VOL_MAX || set.vol_bass > VOL_MAX || set.vol_arp > VOL_MAX || set.vol_strum > VOL_MAX || set.dly_tone > 9u || set.dly_free > 1u || set.dly_ms < 10u || set.dly_ms > 750u || set.rev_width > 10u
+        || set.vol_pad > VOL_MAX || set.vol_bass > VOL_MAX || set.vol_arp > VOL_MAX || set.vol_strum > VOL_MAX || set.dly_tone > 9u || set.dly_free > 1u || set.dly_ms < 10u || set.dly_ms > 750u || set.drm_kick > VOL_MAX || set.drm_snare > VOL_MAX
+        || set.drm_hatq > VOL_MAX || set.drm_hat8 > VOL_MAX || set.drm_mute > 1u || set.rev_width > 10u
         || !lfos_ok()
         || set.benv_a > 9u || set.benv_d > 9u || set.benv_s > 10u || set.benv_r > 9u
         || set.cur_bank >= NBANK || !banks_ok())
@@ -1057,6 +1136,7 @@ static const char *page_state(int pg)    /* lo que se dice al entrar: si está e
     case PG_BP: return set.bp_on ? "SI" : "NO";
     case PG_DLY: return set.dly_on ? "SI" : "NO";
     case PG_REV: return set.rev_on ? "SI" : "NO";
+    case PG_DRUM: return set.drm_mute ? "SILENCIO" : DRUM_ON ? "SI" : "SUBE UN VOLUMEN";
     case PG_LFO_PAD: case PG_LFO_ARP: case PG_LFO_BASS:
         return set.lfo[pg - PG_LFO_PAD].on ? lfo_dest_name(pg - PG_LFO_PAD, set.lfo[pg - PG_LFO_PAD].dest) : "NO";
     default: return "";
@@ -1072,6 +1152,7 @@ static int page_active(int pg)
     case PG_DLY: return set.dly_on != 0;
     case PG_REV: return set.rev_on != 0;
     case PG_LFO_PAD: case PG_LFO_ARP: case PG_LFO_BASS: return set.lfo[pg - PG_LFO_PAD].on != 0;
+    case PG_DRUM: return DRUM_ON;
     default: return 0;
     }
 }
@@ -1095,6 +1176,7 @@ static void sel_toggle(void)
         break;
     case PG_REV: set.rev_on = !set.rev_on; break;
     case PG_LFO_PAD: case PG_LFO_ARP: case PG_LFO_BASS: set.lfo[pg - PG_LFO_PAD].on = !set.lfo[pg - PG_LFO_PAD].on; break;
+    case PG_DRUM: set.drm_mute = !set.drm_mute; break;
     case PG_ENV_PAD: case PG_ENV_ARP: case PG_ENV_BASS: app_say("ENVOLVENTE", "SIEMPRE ACTIVA"); return;
     default: app_say("SEL", "EN ARP, FX O LFO"); return;   /* (HOME y GLO: nada que encender) */
     }
@@ -1349,6 +1431,9 @@ static void input(void)
         } else if (k == B_LFO) {             /* LFO: pad, arpegio, bajo */
             static const uint8_t P[3] = {PG_LFO_PAD, PG_LFO_ARP, PG_LFO_BASS};
             page_go(P, 3, &st.mem_lfo);
+        } else if (k == B_EDIT) {            /* la caja de ritmos */
+            static const uint8_t P[1] = {PG_DRUM};
+            page_go(P, 1, &st.mem_drum);
         } else if (k == B_GLO) {             /* tonalidad, modo, octava, brillo */
             static const uint8_t P[1] = {PG_GLO};
             page_go(P, 1, &st.mem_glo);
@@ -1492,6 +1577,12 @@ static void input(void)
             set.tempo = (uint8_t)clamp((int32_t)set.tempo + e, 40, 220);
             int_text(set.tempo, t);
             set_changed("TEMPO", t);
+        } else if (st.page == PG_DRUM && k >= EN_K1) {   /* RITMO: el volumen de bombo, caja, charles a negras y a corcheas */
+            static const char *const NAME[4] = {"BOMBO", "CAJA", "CHARLES 1/4", "CHARLES 1/8"};
+            uint8_t *vol = k == EN_K1 ? &set.drm_kick : k == EN_K2 ? &set.drm_snare : k == EN_K3 ? &set.drm_hatq : &set.drm_hat8;
+            *vol = (uint8_t)clamp((int32_t)*vol + e, 0, VOL_MAX);
+            int_text(*vol * 100 / VOL_MAX, t); text_cat(t, "%");
+            set_changed(NAME[k - EN_K1], t);
         } else if (st.page == PG_GLO && k == EN_ALGO) {   /* GLOBAL: encadenar acordes, en ALGORITHM */
             set.lead = e > 0;
             set_changed("ENCADENAR", set.lead ? "SI" : "NO");
@@ -1540,6 +1631,7 @@ static void input(void)
                        | (st.page >= PG_ENV_PAD && st.page <= PG_ENV_BASS ? 1u << B_ENV : 0u)
                        | (lfo_on || (st.page >= PG_LFO_PAD && st.page <= PG_LFO_BASS) ? 1u << B_LFO : 0u)
                        | (st.page == PG_MAIN ? 1u << B_HOME : 0u) | (st.page == PG_GLO ? 1u << B_GLO : 0u)
+                       | (DRUM_ON || st.page == PG_DRUM ? 1u << B_EDIT : 0u)
                        | (page_active(st.page) ? 1u << B_SEL : 0u);   /* SEL: lo de esta página suena */
         st.leds = lit;
         if (st.playing || st.rec == 2) lit |= 1u << B_PLAY;
@@ -1685,7 +1777,8 @@ static void draw(void)
         int pg = st.page;
         for (i = 0; i < 4; i++) v[i][0] = 0;
         text_cat(head, PAGE_NAME[pg]);
-        if (pg == PG_ARP || pg == PG_BP || pg == PG_DLY || pg == PG_REV || pg >= PG_LFO_PAD) {
+        if (pg == PG_ARP || pg == PG_BP || pg == PG_DLY || pg == PG_REV || (pg >= PG_LFO_PAD && pg <= PG_LFO_BASS)
+            || pg == PG_DRUM) {
             text_cat(head, page_active(pg) ? "  SEL: SI" : "  SEL: NO");
         }
         if (pg == PG_ARP) {
@@ -1695,6 +1788,12 @@ static void draw(void)
             text_cat(v[1], ARP_MODE_NAME[set.arp_mode]);
             text_cat(v[2], ARP_DIV_NAME[set.arp_div]);
             int_text(set.arp_len * 10, v[3]); text_cat(v[3], "%");
+        } else if (pg == PG_DRUM) {
+            lbl[0] = "BOMBO"; lbl[1] = "CAJA"; lbl[2] = "CHARL 1/4"; lbl[3] = "CHARL 1/8";
+            int_text(set.drm_kick * 100 / VOL_MAX, v[0]); text_cat(v[0], "%");
+            int_text(set.drm_snare * 100 / VOL_MAX, v[1]); text_cat(v[1], "%");
+            int_text(set.drm_hatq * 100 / VOL_MAX, v[2]); text_cat(v[2], "%");
+            int_text(set.drm_hat8 * 100 / VOL_MAX, v[3]); text_cat(v[3], "%");
         } else if (pg == PG_GLO) {
             text_cat(head, set.lead ? "  ENCADENAR SI" : "  ENCADENAR NO");
             lbl[0] = "TONO"; lbl[1] = "MODO"; lbl[2] = "OCTAVA"; lbl[3] = "BRILLO";
@@ -1804,6 +1903,8 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "vol_arp")) *got = set.vol_arp;
     else if (!strcmp(what, "arp_free")) *got = set.arp_free;
     else if (!strcmp(what, "meter")) *got = set.meter;
+    else if (!strcmp(what, "drm_kick")) *got = set.drm_kick;
+    else if (!strcmp(what, "drum_hits")) *got = drum_hits >= 4u;
     else if (!strcmp(what, "dly_ms")) *got = set.dly_free ? set.dly_ms : -1;
     else if (!strcmp(what, "page")) *got = st.page;
     else if (!strcmp(what, "rec")) *got = st.rec;

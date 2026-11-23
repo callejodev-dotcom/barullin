@@ -27,6 +27,7 @@ Los knobs K1–K4 son de la página en la que estás. Cada botón recorre sus p�
 | | Reverb | sí / no | sala | tono | ancho estéreo | mezcla |
 | ENV | Pad, arpegio, bajo | — | ataque (2 ms–2 s) | caída (50 ms–3 s) | sostenido (0–100 %) | release (20 ms–4 s) |
 | LFO | Pad, arpegio, bajo | sí / no | destino (filtro/brillo, volumen, afinar, paneo) | velocidad (0,1–10 Hz) | cantidad | forma (seno, triángulo, cuadrada, azar) |
+| EDIT | Ritmo | silencio rápido | bombo (a negras) | caja (en el 2 y el 4) | charles a negras | charles a corcheas |
 | GLO | Global | — | tonalidad | modo | octava | brillo del pad (ALGORITHM: encadenar acordes sí/no) |
 | HOME | Principal | — | volumen pad | volumen bajo | volumen arpegio | volumen rasgueo |
 
@@ -78,7 +79,7 @@ python3 base/tools/fm1_install.py app/build/barullin.fwsc         # instalar en 
 - [x] Acordes por grados, modos y modificadores, con voice leading
 - [x] Rasgueo, bajo y pad; salida MIDI
 - [x] Arpegiador con reloj MIDI
-- [ ] Ritmos de acompañamiento
+- [x] Caja de ritmos sencilla (EDIT)
 - [x] Grabar y repetir ideas (REC / PLAY)
 - [x] Reloj MIDI y start/stop
 - [x] Bajo pulsado, envolventes y LFO por sonido
