@@ -168,6 +168,7 @@ def render_idea(idea, L, loops=1):
         return chords[-1]
 
     parts = {"ACORDES": [], "BAJO": [], "ARPEGIO": [], "BATERIA": []}
+    mudas = set()
     vel = lambda v: max(1, min(127, round(40 + 87 * v / 16)))   # el volumen de la capa, a velocidad
     for lp in range(loops):
         for i, (a, b) in enumerate(spans):
@@ -198,11 +199,14 @@ def render_idea(idea, L, loops=1):
             parts["BAJO"].append((t, step * inf[II_BP_LEN] / 10.0, max(0, min(127, note)), vel(inf[II_VOL_BASS] or 12)))
 
     # el arpegiador (arp_fire): en el compás (arp_note_bar) o libre (arp_note), con su azar
-    if inf[II_VOL_ARP]:
+    # (todas las partes salen siempre: lo que en el FM-1 estaba a 0 o apagado va con un sonido de partida, y su
+    # pista de Ableton, sin volumen: ahí está si se quiere meter)
+    if True:
         pb = [2, 3, 4][inf[II_ARP_DIV] % 3]
         step = 1.0 / pb
         rng = [0x1234567]
         mode_a, octs = inf[II_ARP_MODE], max(1, inf[II_ARP_OCT])
+        alen = inf[II_ARP_LEN] or 5
         arp_i, last = 0, None
 
         def rnd():
@@ -251,10 +255,24 @@ def render_idea(idea, L, loops=1):
                     k = pos
                 note = c.notes[k % n] + 12 * (k // n) + 12 * oc
             arp_i += 1
-            parts["ARPEGIO"].append((t, step * inf[II_ARP_LEN] / 10.0, max(0, min(127, note)), vel(inf[II_VOL_ARP])))
+            parts["ARPEGIO"].append((t, step * alen / 10.0, max(0, min(127, note)), vel(inf[II_VOL_ARP] or 12)))
 
     # el ritmo (drum_step): bombo en el pulso, caja en el 2 y el 4, charles a corcheas
-    if not inf[II_DRM_MUTE] and (inf[II_DRM_KICK] or inf[II_DRM_SNARE] or inf[II_DRM_HAT]):
+    if True:
+        dm = inf[II_DRM_MUTE]
+        kick = inf[II_DRM_KICK] if inf[II_DRM_KICK] and not dm else 0
+        snare = inf[II_DRM_SNARE] if inf[II_DRM_SNARE] and not dm else 0
+        hatv = inf[II_DRM_HAT] if inf[II_DRM_HAT] and not dm else 0
+        if not kick:
+            mudas.add("KICK")
+        if not snare and not hatv:
+            mudas.add("CAJAS")
+        if not (kick or snare or hatv):           # todo apagado: el ritmo de partida entero
+            kick, snare, hatv = 12, 12, 8
+        elif not snare and not hatv:
+            snare, hatv = 12, 8
+        elif not kick:
+            kick = 12
         bar8, beats = meter[1], meter[5]
         hat = 46 if inf[II_DRM_HOPEN] >= 5 else 42  # abierto o cerrado
         for s8 in range(total8):
@@ -262,12 +280,19 @@ def render_idea(idea, L, loops=1):
             beat = beats >> s & 1
             nbeat = sum(beats >> k & 1 for k in range(s))
             t = s8 / 2.0
-            if beat and inf[II_DRM_KICK]:
-                parts["BATERIA"].append((t, 0.25, 36, vel(inf[II_DRM_KICK])))
-            if beat and nbeat & 1 and inf[II_DRM_SNARE]:
-                parts["BATERIA"].append((t, 0.25, 38, vel(inf[II_DRM_SNARE])))
-            if inf[II_DRM_HAT]:
-                parts["BATERIA"].append((t, 0.25, hat, max(1, int(vel(inf[II_DRM_HAT]) * (1.0 if beat else 0.8)))))
+            if beat and kick:
+                parts["BATERIA"].append((t, 0.25, 36, vel(kick)))
+            if beat and nbeat & 1 and snare:
+                parts["BATERIA"].append((t, 0.25, 38, vel(snare)))
+            if hatv:
+                parts["BATERIA"].append((t, 0.25, hat, max(1, int(vel(hatv) * (1.0 if beat else 0.8)))))
+    if not inf[II_VOL_PAD]:
+        mudas.add("ACORDES")
+    if not inf[II_VOL_BASS]:
+        mudas.add("BAJO")
+    if not inf[II_VOL_ARP]:
+        mudas.add("ARPEGIO")
+    parts["MUDAS"] = sorted(mudas)                # (las que en el FM-1 no sonaban: en Ableton, sin volumen)
     return parts, total8 / 2.0
 
 
@@ -312,7 +337,7 @@ def write_midi(path, title, tempo, ts, parts, beats):
     end = round(beats * PPQ)
     tracks = [track(meta, title, end)]
     for name, notes in parts.items():
-        if not notes:
+        if not notes or name not in CHANNEL:
             continue
         ch, ev = CHANNEL[name], []
         for t, d, n, v in notes:
@@ -577,6 +602,11 @@ def write_als(path, ideas_out, tpl=None, stage=4):
         t.find("Name/UserName").set("Value", part.capitalize())
         if part not in named:
             t.find("Color").set("Value", str(PART_COLOR[part]))
+        mud = set(first[3].get("MUDAS", [])) if first else set()
+        silent = (("KICK" in mud) if part == "BOMBO" else
+                  ("CAJAS" in mud and ("KICK" in mud or "BOMBO" in named)) if part == "BATERIA" else part in mud)
+        if silent and len([x for x in ideas_out if x]) == 1:   # en el FM-1 no sonaba: sin volumen, pero ahí está
+            t.find("DeviceChain/Mixer/Volume/Manual").set("Value", "0.0003162277571")
         slots = t.findall("DeviceChain/MainSequencer/ClipSlotList/ClipSlot")
         for si, x in enumerate(ideas_out[:nslots]):
             if stage < 3 or (stage == 3 and (si or pi)):   # (diagnóstico: sin clips, o uno solo)
@@ -857,7 +887,8 @@ def main():
         write_midi(os.path.join(a.salida, title + ".mid"), title, tempo, ts, parts, beats)
         p1, b1 = render_idea(idea, L, 1) if a.vueltas != 1 else (parts, beats)
         out.append((title, tempo, ts, p1, b1, inf[II_SOUND]))
-        print(f"  {title}.mid  ({b1:g} pulsos, " + ", ".join(k.lower() for k, v in parts.items() if v) + ")")
+        print(f"  {title}.mid  ({b1:g} pulsos, " + ", ".join(k.lower() + (" (a 0)" if k in parts["MUDAS"] else "")
+                                                   for k, v in parts.items() if v and k in CHANNEL) + ")")
     if not any(out):
         raise SystemExit("no hay ideas guardadas (graba con REC y guarda con SAVE)")
     # un proyecto de Ableton por idea: su carpeta, su tempo y su compás, sus pistas (y la idea en la primera escena),
