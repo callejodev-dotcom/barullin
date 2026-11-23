@@ -102,7 +102,7 @@ tap ARP
 wait 30
 expect page 1
 expect arp 0
-turn K1 1
+tap SEL
 wait 30
 expect arp 1
 # las octavas, en ALGORITHM; K1..K4 de la página no tocan la tonalidad
@@ -144,7 +144,8 @@ wait 400
 expect arp 2
 expect pad_on 1
 expect bass_on 0
-turn K1 -2
+turn K1 -1
+tap SEL
 wait 400
 expect arp 0
 expect page 1
@@ -211,11 +212,10 @@ tap FX
 wait 30
 expect page 2
 expect key 2
-turn K1 -1
 wait 30
 expect dly_on 0
-turn K1 1
-turn K4 -1
+tap SEL
+turn K3 -1
 wait 30
 expect dly_on 1
 expect dly 2
@@ -223,8 +223,8 @@ shot fx_delay.png
 tap FX
 wait 30
 expect page 3
-turn K2 2
-turn K4 3
+turn K1 2
+turn K3 3
 wait 30
 expect rev_size 8
 expect rev 7
@@ -345,7 +345,7 @@ expect page 1
 tap ARP
 wait 30
 expect page 7
-turn K1 1
+tap SEL
 wait 30
 expect bp_on 1
 key 25 down
@@ -364,7 +364,7 @@ shot bajo.png
 tap ARP
 wait 30
 expect page 1
-turn K1 1
+tap SEL
 wait 400
 expect arp 1
 expect low_on 1
@@ -373,17 +373,17 @@ expect high_on 1
 tap ARP
 wait 30
 expect page 7
-turn K3 1
+turn K2 1
 wait 30
 expect bp_pat 1
-turn K1 -1
+tap SEL
 wait 400
 expect bp_on 0
 expect low_on 0
 tap ARP
 wait 30
 expect page 1
-turn K1 -1
+tap SEL
 wait 400
 expect arp 0
 expect bass_on 1
@@ -395,7 +395,8 @@ expect lfo_dest 0
 tap LFO
 wait 30
 expect page 8
-turn K1 2
+tap SEL
+turn K1 1
 turn K3 5
 wait 30
 expect lfo_dest 2
@@ -406,23 +407,25 @@ key 0 up
 wav lfo.wav
 wait 3000
 wavstop
-turn K1 -2
+tap SEL
 tap LFO
 wait 30
 expect page 9
-turn K1 2
+tap SEL
+turn K1 1
 wait 30
 expect lfo_arp 2
 expect lfo_dest 0
-turn K1 -2
+tap SEL
 tap LFO
 wait 30
 expect page 10
-turn K1 3
+tap SEL
+turn K1 2
 wait 30
 expect lfo_bass 3
 shot lfo_bajo.png
-turn K1 -3
+tap SEL
 tap LFO
 wait 30
 expect page 8
@@ -437,7 +440,7 @@ expect led_fx 1
 tap FX
 wait 30
 expect page 2
-turn K1 -1
+tap SEL
 tap HOME
 wait 30
 expect led_fx 0
@@ -446,7 +449,7 @@ wait 30
 tap ARP
 wait 30
 expect page 7
-turn K1 1
+tap SEL
 wait 30
 expect bp_on 1
 tap ARP
@@ -459,7 +462,7 @@ expect led_arp 1
 tap ARP
 wait 30
 expect page 7
-turn K1 -1
+tap SEL
 tap HOME
 wait 30
 expect led_arp 0
@@ -470,7 +473,7 @@ expect page 2
 tap FX
 wait 30
 expect page 3
-turn K1 1
+tap SEL
 tap FX
 wait 30
 expect page 2
@@ -480,7 +483,31 @@ expect led_fx 1
 tap FX
 wait 30
 expect page 3
-turn K1 -1
+tap SEL
 tap HOME
 wait 30
 expect led_fx 0
+# --- SEL: se ilumina si lo de la página suena; en el arpegiador, K1 es "con pad" ---
+tap ARP
+wait 30
+expect page 7
+tap ARP
+wait 30
+expect page 1
+expect led_sel 0
+turn K1 1
+wait 30
+expect arp_pad 1
+expect arp 0
+tap SEL
+wait 30
+expect arp 2
+expect led_sel 1
+shot sel.png
+tap SEL
+wait 30
+expect arp 0
+expect led_sel 0
+turn K1 -1
+tap HOME
+wait 30

@@ -17,17 +17,17 @@ Construido sobre [fm1-base](https://github.com/charlesvestal/fm1-base) de Charle
 
 ### Páginas
 
-Los knobs K1–K4 son de la página en la que estás. Cada botón recorre sus páginas (de la última vuelve a la primera). Si vienes de otra parte, te lleva a la página que tiene algo encendido (si hay varias, a la última que visitaste) y, si no hay ninguna, a la última suya en la que estuviste. Lo que se enciende y se apaga va siempre en **K1**. La luz de ARP, FX y LFO sigue encendida mientras algo de su sección suena. **HOME** vuelve a la página principal; lo que suena sigue sonando.
+Los knobs K1–K4 son de la página en la que estás. Cada botón recorre sus páginas (de la última vuelve a la primera). Si vienes de otra parte, te lleva a la página que tiene algo encendido (si hay varias, a la última que visitaste) y, si no hay ninguna, a la última suya en la que estuviste. **SEL enciende o apaga** lo de la página en la que estás, y se ilumina cuando está encendido. La luz de ARP, FX y LFO sigue encendida mientras algo de su sección suena. **HOME** vuelve a la página principal; lo que suena sigue sonando.
 
-| Botón | Páginas | K1 | K2 | K3 | K4 |
-| --- | --- | --- | --- | --- | --- |
-| ARP | Arpegiador | no / solo / +pad | modo (sube, baja, sube-baja, azar) | paso (1/8, 1/8T, 1/16) | duración (octavas 1–3 en ALGORITHM) |
-| | Bajo pulsado | sí / no | paso (1/4, 1/8, 1/8T, 1/16) | patrón (nota, octavas, quinta) | duración |
-| FX | Delay | sí / no | tiempo al tempo (1/16–1/2) | repeticiones | mezcla |
-| | Reverb | sí / no | tamaño | tono | mezcla |
-| ENV | Pad, arpegio, bajo | ataque (2 ms–2 s) | caída (50 ms–3 s) | sostenido (0–100 %) | release (20 ms–4 s) |
-| LFO | Pad, arpegio, bajo | destino (no, filtro/brillo, volumen, afinar, paneo) | velocidad (0,1–10 Hz) | cantidad | forma (seno, triángulo, cuadrada, azar) |
-| HOME | Principal | tonalidad | modo | octava | brillo |
+| Botón | Página | SEL | K1 | K2 | K3 | K4 |
+| --- | --- | --- | --- | --- | --- | --- |
+| ARP | Arpegiador | sí / no | con pad | modo (sube, baja, sube-baja, azar) | paso (1/8, 1/8T, 1/16) | duración (octavas 1–3 en ALGORITHM) |
+| | Bajo pulsado | sí / no | paso (1/4, 1/8, 1/8T, 1/16) | patrón (nota, octavas, quinta) | duración | octava (−1, 0, +1) |
+| FX | Delay | sí / no | tiempo al tempo (1/16–1/2) | repeticiones | mezcla | tono de las repeticiones |
+| | Reverb | sí / no | sala | tono | mezcla | ancho estéreo |
+| ENV | Pad, arpegio, bajo | — | ataque (2 ms–2 s) | caída (50 ms–3 s) | sostenido (0–100 %) | release (20 ms–4 s) |
+| LFO | Pad, arpegio, bajo | sí / no | destino (filtro/brillo, volumen, afinar, paneo) | velocidad (0,1–10 Hz) | cantidad | forma (seno, triángulo, cuadrada, azar) |
+| HOME | Principal | — | tonalidad | modo | octava | brillo |
 
 El arpegiador y el bajo pulsado son independientes y van a la misma rejilla del tempo. Efectos y LFO vienen apagados de serie.
 
