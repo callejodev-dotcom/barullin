@@ -540,3 +540,16 @@ wait 400
 expect arp 0
 expect high_on 0
 
+# --- ciclo del arpegio: en el compás de serie; ALGORITHM lo pasa a libre ---
+expect arp_free 0
+tap ARP
+wait 30
+expect page 1
+turn ALGO 1
+wait 30
+expect arp_free 1
+turn ALGO -1
+wait 30
+expect arp_free 0
+tap HOME
+wait 30

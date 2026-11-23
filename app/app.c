@@ -14,7 +14,7 @@
 #define SR 44100.0f
 
 /* ------------------------------------------------------------- ajustes --- */
-#define SET_MAGIC 0x42524C42u            /* "BRLB" */
+#define SET_MAGIC 0x42524C43u            /* "BRLC" */
 #define LOOP_MAX 64                      /* cambios de acorde en una idea */
 #define LOOP_STEPS 128                   /* 16 compases de corcheas */
 typedef struct { uint8_t step; int8_t degree; uint8_t mods; uint8_t inv; } loop_ev_t;
@@ -43,6 +43,7 @@ typedef struct {
     uint8_t bright;                      /* 0..20: el corte del filtro del pad */
     uint8_t lead;                        /* voice leading */
     uint8_t hold;                        /* el acorde sigue al soltar (por defecto, sí) */
+    uint8_t arp_free;                    /* ciclo del arpegio: 0 en el compás (grupos de 4), 1 libre */
     uint8_t arp_mute_vol;                /* el volumen que tenía el arpegio antes de silenciarlo con SEL */
     uint8_t arp_mode;                    /* 0 sube, 1 baja, 2 sube-baja, 3 azar */
     uint8_t arp_div;                     /* 0 corcheas, 1 tresillos, 2 semicorcheas */
@@ -349,11 +350,33 @@ static void arp_voice(int note, int low, float step, int len)
     midi_ch(0x90u, low ? 3u : 4u, (uint32_t)note, 100);
 }
 
-static void arp_fire(float step)
+/* En el compás: grupos de 4 pasos (3 en tresillos) contados desde el reloj, así que siempre caen en su sitio.
+ * Las notas del acorde suben (con 3 notas, la cuarta es la fundamental arriba); con varias octavas, cada
+ * grupo sube una. */
+static int arp_note_bar(uint32_t idx)
+{
+    static const uint8_t SB4[4] = {0, 1, 2, 1}, SB3[3] = {0, 2, 1};
+    int n = achord.n, G = set.arp_div == 1 ? 3 : 4, pos = (int)(idx % (uint32_t)G), k;
+    int oct = (int)((idx / (uint32_t)G) % set.arp_oct);
+    if (n == 0) return -1;
+    switch (set.arp_mode) {
+    case 1: k = G - 1 - pos; break;                               /* baja */
+    case 2: k = G == 4 ? SB4[pos] : SB3[pos]; break;              /* sube y baja */
+    case 3:                                                       /* azar */
+        arp_rng = arp_rng * 1664525u + 1013904223u;
+        k = (int)((arp_rng >> 16) % (uint32_t)n);
+        break;
+    default: k = pos; break;                                      /* sube */
+    }
+    return clamp(achord.notes[k % n] + 12 * (k / n) + 12 * oct, 0, 127);
+}
+
+static void arp_fire(float step, uint32_t idx)
 {
     int note;
     if (arp_restart) { arp_restart = 0; arp_i = 0; }
-    note = arp_note(arp_i++);
+    note = set.arp_free ? arp_note(arp_i) : arp_note_bar(idx);
+    arp_i++;
     if (note < 0) return;
     arp_voice(note, 0, step, set.arp_len);
     arp_steps++;
@@ -512,7 +535,7 @@ void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
             if (ARP_ON) {
                 uint32_t pb = ARP_PB[set.arp_div % 3u];
                 idx = tp_bint * pb + (uint32_t)(tp_bfrac * (float)pb);
-                if (idx != arp_last) { arp_last = idx; if (achord.gate) arp_fire(arp_step_len()); }
+                if (idx != arp_last) { arp_last = idx; if (achord.gate) arp_fire(arp_step_len(), idx); }
             }
             if (set.bp_on) {
                 uint32_t pb = BP_PB[set.bp_div % 4u];
@@ -666,6 +689,7 @@ static void settings_defaults(void)
     set.lead = 1;
     set.hold = 1;
     set.arp_mute_vol = VOL_UNITY;
+    set.arp_free = 0;
     set.arp_mode = 0;
     set.arp_div = 0;
     set.arp_oct = 1;
@@ -742,7 +766,7 @@ static void settings_load(void)
     if (plat_store_load(OBJ_SETTINGS, &set, sizeof set) != (int)sizeof set || set.magic != SET_MAGIC
         || set.key > 11u || set.mode >= BL_MODE_COUNT || set.octave < -2 || set.octave > 2
         || set.bright > 20u || set.lead > 1u || set.hold > 1u
-        || set.arp_mute_vol > VOL_MAX || set.arp_mode > 3u || set.arp_div > 2u || set.arp_oct < 1u || set.arp_oct > 3u
+        || set.arp_mute_vol > VOL_MAX || set.arp_free > 1u || set.arp_mode > 3u || set.arp_div > 2u || set.arp_oct < 1u || set.arp_oct > 3u
         || set.arp_len < 1u || set.arp_len > 9u || set.tempo < 40u || set.tempo > 220u
         || set.dly_mix > 10u || set.dly_div > 5u || set.dly_fb > 9u || set.rev_mix > 10u
         || set.dly_on > 1u || set.rev_on > 1u || set.rev_size > 9u || set.rev_tone > 9u
@@ -1233,7 +1257,10 @@ static void input(void)
     for (k = 0; k < NE; k++) {
         char t[24];
         if ((e = plat_enc((int)k)) == 0) continue;
-        if (st.page == PG_ARP && k >= EN_K1) {   /* ARPEGIADOR (SEL lo enciende) */
+        if (st.page == PG_ARP && k == EN_ALGO) {   /* ARPEGIADOR: el ciclo, en ALGORITHM */
+            set.arp_free = e > 0;
+            set_changed("ARP CICLO", set.arp_free ? "LIBRE" : "COMPAS");
+        } else if (st.page == PG_ARP && k >= EN_K1) {   /* ARPEGIADOR (SEL lo enciende) */
             if (k == EN_K1) {
                 set.arp_oct = (uint8_t)clamp((int32_t)set.arp_oct + e, 1, 3);
                 int_text(set.arp_oct, t);
@@ -1537,6 +1564,7 @@ static void draw(void)
             text_cat(head, page_active(pg) ? "  SEL: SI" : "  SEL: NO");
         }
         if (pg == PG_ARP) {
+            text_cat(head, set.arp_free ? "  CICLO LIBRE" : "  CICLO COMPAS");
             lbl[0] = "OCTAVAS"; lbl[1] = "MODO"; lbl[2] = "PASO"; lbl[3] = "LARGO";
             int_text(set.arp_oct, v[0]);
             text_cat(v[1], ARP_MODE_NAME[set.arp_mode]);
@@ -1646,6 +1674,7 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "dirty")) *got = set_dirty;
     else if (!strcmp(what, "arp")) *got = ARP_ON;
     else if (!strcmp(what, "vol_arp")) *got = set.vol_arp;
+    else if (!strcmp(what, "arp_free")) *got = set.arp_free;
     else if (!strcmp(what, "page")) *got = st.page;
     else if (!strcmp(what, "rec")) *got = st.rec;
     else if (!strcmp(what, "rev")) *got = set.rev_mix;
