@@ -87,8 +87,9 @@ Sale la carpeta **Barullin Export**:
 - **FM-1 (original)**: en cada proyecto, una pista de audio con la idea tal como suena en el FM-1 (pad, bajo, arpegio,
   ritmo, efectos y LFO), grabada del mismo firmware en el simulador del ordenador, una vuelta en bucle, para saber de
   qué partes. `--sin-original` la quita.
-- **Barullin.barullin**: la copia de seguridad de todo. `python3 base/tools/fm1_backup.py restore "Barullin
-  Export/Barullin.barullin"` la devuelve al FM-1 (pregunta en su pantalla: SEL sí, HOME no).
+- **Copias/261124 1925 Barullin.barullin**: una copia de seguridad de todo cada vez que exportas, con la fecha y la
+  hora en el nombre (no se pisan). `python3 base/tools/fm1_backup.py restore "Barullin Export/Copias/261124 1925
+  Barullin.barullin"` la devuelve al FM-1 (pregunta en su pantalla: SEL sí, HOME no).
 
 **Con los plugins de Barullo, solo**: de serie, cada proyecto sale con Barullo Xuno, 7FM y Bombo cargados, un kit de
 Ableton para la caja y el charles, y Barullo Verb y Ley en los retornos (el molde es `tools/ableton/barullo.als`). El

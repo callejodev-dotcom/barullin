@@ -8,7 +8,7 @@
                MIDI, de serie 1)   --port NOMBRE (el puerto MIDI del FM-1)
 
 Lo que sale, en la carpeta:
-    Barullin.barullin        la copia de seguridad (la misma que base/tools/fm1_backup.py restore devuelve al FM-1)
+    Copias/AAMMDD HHMM Barullin.barullin   una copia de seguridad nueva cada vez (la misma que base/tools/fm1_backup.py restore devuelve al FM-1)
     Idea 1 - ... Project/*.midcada idea en su MIDI (tipo 1): ACORDES, BAJO, ARPEGIO y BATERIA, cada uno en su pista y su
                              canal (2, 3, 4 y 10, como los manda Barullín), con su tempo y su compás
     Idea N - ... Project/    un proyecto de Ableton Live (12) por idea: una pista por parte, la idea en la primera
@@ -32,6 +32,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 import xml.etree.ElementTree as ET
 import zlib
 
@@ -933,7 +934,9 @@ def main():
             a.plantilla = p
             print("plantilla de Ableton: " + p)
     os.makedirs(a.salida, exist_ok=True)
-    bk = a.desde or os.path.join(a.salida, "Barullin.barullin")
+    # una copia nueva cada vez, con la fecha y la hora en el nombre ("261124 1925 Barullin.barullin"): no se pisan
+    bk = a.desde or os.path.join(a.salida, "Copias", time.strftime("%y%m%d %H%M") + " Barullin.barullin")
+    os.makedirs(os.path.dirname(os.path.abspath(bk)), exist_ok=True)
     if not a.desde:
         print("leyendo las ideas del FM-1...")
         backup_from_fm1(bk, a.port)
