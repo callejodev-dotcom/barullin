@@ -125,6 +125,7 @@ def load_chords():
                                  ctypes.POINTER(BlChord)]
     L.bl_chord_lead.argtypes = [ctypes.POINTER(BlChord), ctypes.POINTER(BlChord), ctypes.c_int, ctypes.c_int]
     L.bl_note_name.restype = ctypes.c_char_p
+    L.bl_degree_name.argtypes = [ctypes.POINTER(BlChord), ctypes.c_int, ctypes.c_char_p, ctypes.c_int]
     return L
 
 
@@ -300,6 +301,63 @@ def idea_title(i, idea, L):
     inf = idea["info"]
     key = L.bl_note_name(inf[II_KEY], inf[II_KEY]).decode()
     return f"Idea {i + 1} - {key} {MODE_NAME[inf[II_MODE] % 7].lower()} {inf[II_TEMPO]}"
+
+
+# ---------------------------------------------------------------- los acordes, en texto
+def write_chords_txt(path, title, idea, L):
+    """los acordes de la idea: uno por línea (cuándo entra, cuánto dura, el grado y sus notas) y la idea en una
+    línea, compás a compás"""
+    inf = idea["info"]
+    key, mode = inf[II_KEY], inf[II_MODE] % 7
+    meter = METER[inf[II_METER] % len(METER)]
+    bar8 = meter[1]
+    eighths = meter[6][1] == 8                    # (en 6/8 y 7/8 se cuenta en corcheas)
+    length8 = idea["len"]
+    evs = sorted(idea["events"])
+    base = 60 + 12 * ((inf[II_OCTAVE] ^ 0x80) - 0x80)
+    rows = []
+    for i, (t8, degree, mods, inv) in enumerate(evs):
+        c = BlChord()
+        L.bl_chord_build(key, mode, degree, mods, inv, base, ctypes.byref(c))
+        rom = ctypes.create_string_buffer(16)
+        L.bl_degree_name(ctypes.byref(c), degree, rom, 16)
+        start = t8 if i else 0
+        end = evs[i + 1][0] if i + 1 < len(evs) else length8
+        notes = " ".join(L.bl_note_name(c.notes[k] % 12, key).decode() for k in range(c.n))
+        rows.append((start, end, c.name.decode(), rom.value.decode(), notes))
+
+    def where(t8):                                # "3.2": compás 3, pulso 2 ("3.2y": la corchea de después)
+        b, r = divmod(t8, bar8)
+        if eighths:
+            return f"{b + 1}.{r + 1}"
+        return f"{b + 1}.{r // 2 + 1}" + ("y" if r % 2 else "")
+
+    def dur(n8):
+        bars, r = divmod(n8, bar8)
+        out = []
+        if bars:
+            out.append(f"{bars} compás" if bars == 1 else f"{bars} compases")
+        if r:
+            n = r if eighths else r / 2
+            unit = "corchea" if eighths else "pulso"
+            out.append(f"{n:g} {unit}" + ("" if n == 1 else "s"))
+        return " y ".join(out)
+
+    nbars = -(-length8 // bar8)
+    lines = [title, "",
+             f"{L.bl_note_name(key, key).decode()} {MODE_NAME[mode].lower()}   {inf[II_TEMPO]} BPM   {meter[0]}   "
+             f"{nbars} {'compás' if nbars == 1 else 'compases'}", "",
+             f"{'ENTRA':<7}{'ACORDE':<10}{'GRADO':<8}{'DURA':<22}NOTAS"]
+    for a, b, name, rom, notes in rows:
+        lines.append(f"{where(a):<7}{name:<10}{rom:<8}{dur(b - a):<22}{notes}")
+    bars = []                                     # compás a compás: el que suena al empezar y los que entran luego
+    for bi in range(nbars):
+        lo, hi = bi * bar8, (bi + 1) * bar8
+        names = [n for a, b, n, _, _ in rows if a < hi and b > lo]
+        bars.append(" ".join(names) if names else "%")
+    lines += ["", "| " + " | ".join(bars) + " |", ""]
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
 
 
 # ---------------------------------------------------------------- MIDI (tipo 1)
@@ -499,12 +557,25 @@ def is_pointee(tag):
     return tag in POINTEE_TAGS or tag.endswith("ModulationTarget") or tag.startswith("ControllerTargets.")
 
 
+def live_crc(path):
+    """el OriginalCrc que guarda Live junto a cada archivo: CRC-16/UMTS (0x8005, sin reflejar, de 0) de los
+    primeros 16384 bytes (abletoolz/samples/crc.py)"""
+    crc = 0
+    for b in open(path, "rb").read(16384):
+        crc ^= b << 8
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0x8005) & 0xFFFF if crc & 0x8000 else (crc << 1) & 0xFFFF
+    return crc
+
+
 def save_als(root, path):
     """como lo escribe Live: los valores con comillas (el JSON de ViewData) entre comillas simples y sin &quot;"""
     txt = ET.tostring(root, encoding="unicode")
     txt = re.sub(r'="([^"]*&quot;[^"]*)"', lambda m: "='" + m.group(1).replace("&quot;", '"') + "'", txt)
     xml = ('<?xml version="1.0" encoding="UTF-8"?>\n' + txt + "\n").encode("utf-8")
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    # (sin esta carpeta Live no lo ve como proyecto: al guardar pide "guardar como" y el audio queda fuera)
+    os.makedirs(os.path.join(os.path.dirname(path), "Ableton Project Info"), exist_ok=True)
     with gzip.open(path, "wb") as f:
         f.write(xml)
 
@@ -720,7 +791,7 @@ def write_als(path, ideas_out, tpl=None, stage=4):
             fr.find("RelativePath").set("Value", os.path.relpath(wav, proj).replace(os.sep, "/"))
             fr.find("Path").set("Value", os.path.abspath(wav).replace(os.sep, "/"))
             fr.find("OriginalFileSize").set("Value", str(os.path.getsize(wav)))
-            fr.find("OriginalCrc").set("Value", "0")
+            fr.find("OriginalCrc").set("Value", str(live_crc(wav)))   # (con 0, Live da el audio por perdido)
             sr = ac.find("SampleRef")
             sr.find("LastModDate").set("Value", str(int(os.path.getmtime(wav))))
             sr.find("DefaultDuration").set("Value", str(nfr))
@@ -885,6 +956,7 @@ def main():
         title = idea_title(i, idea, L)
         parts, beats = render_idea(idea, L, max(1, a.vueltas))
         write_midi(os.path.join(a.salida, title + ".mid"), title, tempo, ts, parts, beats)
+        write_chords_txt(os.path.join(a.salida, title + " - acordes.txt"), title, idea, L)
         p1, b1 = render_idea(idea, L, 1) if a.vueltas != 1 else (parts, beats)
         out.append((title, tempo, ts, p1, b1, inf[II_SOUND]))
         print(f"  {title}.mid  ({b1:g} pulsos, " + ", ".join(k.lower() + (" (a 0)" if k in parts["MUDAS"] else "")
