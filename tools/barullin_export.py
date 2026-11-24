@@ -940,6 +940,15 @@ def main():
     if not a.desde:
         print("leyendo las ideas del FM-1...")
         backup_from_fm1(bk, a.port)
+        # si es exactamente igual que la última copia, no se guarda otra: se usa esa
+        cop = os.path.dirname(os.path.abspath(bk))
+        prev = sorted(f for f in os.listdir(cop) if f.endswith(".barullin") and f != os.path.basename(bk))
+        if prev and os.path.exists(bk) and open(bk, "rb").read() == open(os.path.join(cop, prev[-1]), "rb").read():
+            os.remove(bk)
+            bk = os.path.join(cop, prev[-1])
+            print(f"  (igual que la última copia: {prev[-1]})")
+        elif os.path.exists(bk):
+            print(f"  copia nueva: {os.path.basename(bk)}")
     if not os.path.exists(bk):
         raise SystemExit(f"no encuentro {bk}: sin --desde, las ideas se leen del FM-1 (conectado, con Barullín, parado)")
     data = open(bk, "rb").read()

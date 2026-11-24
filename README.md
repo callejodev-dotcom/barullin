@@ -87,7 +87,7 @@ Sale la carpeta **Barullin Export**:
 - **FM-1 (original)**: en cada proyecto, una pista de audio con la idea tal como suena en el FM-1 (pad, bajo, arpegio,
   ritmo, efectos y LFO), grabada del mismo firmware en el simulador del ordenador, una vuelta en bucle, para saber de
   qué partes. `--sin-original` la quita.
-- **Copias/261124 1925 Barullin.barullin**: una copia de seguridad de todo cada vez que exportas, con la fecha y la
+- **Copias/261124 1925 Barullin.barullin**: una copia de seguridad de todo cada vez que exportas (si no ha cambiado nada, no), con la fecha y la
   hora en el nombre (no se pisan). `python3 base/tools/fm1_backup.py restore "Barullin Export/Copias/261124 1925
   Barullin.barullin"` la devuelve al FM-1 (pregunta en su pantalla: SEL sí, HOME no).
 
