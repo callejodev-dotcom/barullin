@@ -9,7 +9,7 @@
 
 Lo que sale, en la carpeta:
     Barullin.barullin        la copia de seguridad (la misma que base/tools/fm1_backup.py restore devuelve al FM-1)
-    Idea 1 - ... .mid        cada idea en su MIDI (tipo 1): ACORDES, BAJO, ARPEGIO y BATERIA, cada uno en su pista y su
+    Idea 1 - ... Project/*.midcada idea en su MIDI (tipo 1): ACORDES, BAJO, ARPEGIO y BATERIA, cada uno en su pista y su
                              canal (2, 3, 4 y 10, como los manda Barullín), con su tempo y su compás
     Idea N - ... Project/    un proyecto de Ableton Live (12) por idea: una pista por parte, la idea en la primera
                              escena, con su tempo y su compás. Las pistas van sin instrumento: arrastra el que quieras.
@@ -955,8 +955,8 @@ def main():
         ts = METER[inf[II_METER] % len(METER)][6]
         title = idea_title(i, idea, L)
         parts, beats = render_idea(idea, L, max(1, a.vueltas))
-        write_midi(os.path.join(a.salida, title + ".mid"), title, tempo, ts, parts, beats)
-        os.makedirs(os.path.join(a.salida, title + " Project"), exist_ok=True)   # (los acordes, dentro del proyecto)
+        os.makedirs(os.path.join(a.salida, title + " Project"), exist_ok=True)   # (el MIDI y los acordes, dentro)
+        write_midi(os.path.join(a.salida, title + " Project", title + ".mid"), title, tempo, ts, parts, beats)
         write_chords_txt(os.path.join(a.salida, title + " Project", title + " - acordes.txt"), title, idea, L)
         p1, b1 = render_idea(idea, L, 1) if a.vueltas != 1 else (parts, beats)
         out.append((title, tempo, ts, p1, b1, inf[II_SOUND]))

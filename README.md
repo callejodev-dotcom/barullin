@@ -78,7 +78,7 @@ python3 tools/barullin_export.py
 
 Sale la carpeta **Barullin Export**:
 
-- **Idea N - … .mid**: cada idea en su MIDI, con ACORDES, BAJO, ARPEGIO y BATERÍA en pistas y canales separados
+- **Idea N - … Project/Idea N - … .mid** (con su txt de acordes al lado): cada idea en su MIDI, con ACORDES, BAJO, ARPEGIO y BATERÍA en pistas y canales separados
   (2, 3, 4 y 10), su tempo y su compás. Es lo que toca el FM-1 con PLAY: el mismo motor de acordes, el bajo
   (sostenido o pulsado), el arpegiador y el ritmo, con los ajustes de cada idea. `--vueltas 4` las repite.
 - **Idea N - … Project/Idea N - ….als**: un proyecto de Ableton Live 12 **por idea**, con una pista por parte y la
